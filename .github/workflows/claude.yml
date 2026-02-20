@@ -1,0 +1,53 @@
+name: Claude Code
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Bedrock model ID"
+        type: string
+        default: "eu.anthropic.claude-sonnet-4-6"
+      aws_region:
+        description: "AWS region for Bedrock OIDC"
+        type: string
+        default: "eu-central-1"
+    secrets:
+      CLAUDE_CODE_ROLE_ARN:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_ID:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          use_bedrock: "true"
+          claude_args: "--model ${{ inputs.model }}"
