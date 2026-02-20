@@ -27,12 +27,6 @@ on:
       GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
         required: true
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: write
-  issues: write
-
 jobs:
   review:
     runs-on: ubuntu-latest

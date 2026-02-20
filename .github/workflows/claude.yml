@@ -19,12 +19,6 @@ on:
       GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
         required: true
 
-permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
-  issues: write
-
 jobs:
   claude:
     runs-on: ubuntu-latest
