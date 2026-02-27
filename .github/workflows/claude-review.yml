@@ -1,0 +1,122 @@
+name: Claude Code Review
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Bedrock model ID"
+        type: string
+        default: "eu.anthropic.claude-sonnet-4-6"
+      aws_region:
+        description: "AWS region for Bedrock OIDC"
+        type: string
+        default: "eu-central-1"
+      additional_instructions:
+        description: "Extra repo-specific review instructions appended to the base prompt"
+        type: string
+        default: ""
+      max_turns:
+        description: "Maximum number of agentic turns"
+        type: string
+        default: "15"
+    secrets:
+      CLAUDE_CODE_ROLE_ARN:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_ID:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
+        required: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Build review prompt
+        id: prompt
+        run: |
+          cat > /tmp/review_prompt.txt << 'BASEPROMPT'
+          You are reviewing a pull request. Follow these instructions carefully:
+
+          1. Read the CLAUDE.md file at the repository root (if it exists) and follow all conventions and guidelines defined there.
+          2. Review every changed file in this PR for:
+             - Correctness and potential bugs
+             - Security concerns (secrets, injection, auth issues)
+             - Performance implications
+             - Code style and consistency with the existing codebase
+             - Test coverage for new or changed behavior
+          3. Be specific: reference file names and line numbers when flagging issues.
+          4. Distinguish between blocking issues (must fix) and suggestions (nice to have).
+          5. If the PR looks good, say so briefly — do not invent problems.
+          BASEPROMPT
+
+          ADDITIONAL="${{ inputs.additional_instructions }}"
+          if [ -n "$ADDITIONAL" ]; then
+            printf '\nAdditionally, check for:\n%s\n' "$ADDITIONAL" >> /tmp/review_prompt.txt
+          fi
+
+          {
+            echo 'value<<PROMPT_EOF'
+            cat /tmp/review_prompt.txt
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          use_bedrock: "true"
+          allowed_bots: "gemma-claude-assistant[bot]"
+          prompt: ${{ steps.prompt.outputs.value }}
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+
+      - name: Post session cost
+        if: always() && steps.claude.outputs.execution_file
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const file = '${{ steps.claude.outputs.execution_file }}';
+            if (!fs.existsSync(file)) return;
+
+            const messages = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const result = Array.isArray(messages)
+              ? messages.find(m => m.type === 'result')
+              : messages;
+            if (!result) return;
+
+            const cost = result.total_cost_usd ?? 0;
+            const turns = result.num_turns ?? 0;
+            const duration = result.duration_ms ? Math.round(result.duration_ms / 1000) : 0;
+            const model = '${{ inputs.model }}';
+
+            const body = `**Claude review cost:** \$${cost.toFixed(4)} · ${turns} turns · ${duration}s · \`${model}\``;
+
+            const issue_number = context.issue?.number ?? context.payload.pull_request?.number;
+            if (issue_number) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body
+              });
+            }
