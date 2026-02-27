@@ -63,6 +63,10 @@ jobs:
           3. Be specific: reference file names and line numbers when flagging issues.
           4. Distinguish between blocking issues (must fix) and suggestions (nice to have).
           5. If the PR looks good, say so briefly — do not invent problems.
+          6. Post your review findings:
+             - Use the `mcp__github_inline_comment__create_inline_comment` tool to leave inline comments on specific lines in the diff for each issue found.
+             - After all inline comments, post a top-level summary comment using `gh pr comment` with an overview of your findings.
+             - If the PR looks good with no issues, post a brief approving summary comment only.
           BASEPROMPT
 
           ADDITIONAL="${{ inputs.additional_instructions }}"
@@ -84,11 +88,10 @@ jobs:
           use_bedrock: "true"
           allowed_bots: "gemma-claude-assistant[bot]"
           prompt: ${{ steps.prompt.outputs.value }}
-          show_full_output: true
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Bash(git *),Bash(grep *),Bash(find *)"
+            --allowedTools "Bash(git *),Bash(grep *),Bash(find *),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment"
 
       - name: Post session cost
         if: always() && steps.claude.outputs.execution_file
