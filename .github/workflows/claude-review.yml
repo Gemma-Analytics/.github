@@ -63,7 +63,7 @@ jobs:
           5. Post your findings:
              a. For each issue, use `mcp__github_inline_comment__create_inline_comment` to comment on the specific diff line.
                 Prefix each comment with [BLOCKING], [Style], or [Suggestion].
-             b. After all inline comments, write a short summary (5-10 lines max) to /tmp/summary.md, then run `gh pr comment --body-file /tmp/summary.md`.
+             b. After all inline comments, use the Write tool to create /tmp/summary.md with a short summary (5-10 lines), then run `gh pr comment --body-file /tmp/summary.md` as a separate Bash command.
              c. If the PR is clean, post only a brief approving summary (no inline comments needed).
           6. Stop immediately.
 
@@ -95,7 +95,7 @@ jobs:
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Bash(git *),Bash(grep *),Bash(find *),Bash(gh *),Bash(cat *),mcp__github_inline_comment__create_inline_comment"
+            --allowedTools "Bash(git *),Bash(grep *),Bash(find *),Bash(gh *),Bash(cat *),Write,mcp__github_inline_comment__create_inline_comment"
 
       - name: Post session cost
         if: always() && steps.claude.outputs.execution_file
