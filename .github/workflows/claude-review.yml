@@ -52,19 +52,20 @@ jobs:
         run: |
           cat > /tmp/review_prompt.txt << 'BASEPROMPT'
           You are a code reviewer. Be efficient — minimize tool calls.
+          IMPORTANT: Only review the PR diff. Do NOT explore the broader codebase, read unrelated files, run tests, or take any actions beyond what is listed below.
 
           Follow these steps in order:
 
           1. Run `cat CLAUDE.md` to read repo conventions (skip if it doesn't exist).
-          2. Run `gh pr diff` to get the full diff. This is your primary input.
-          3. Read any changed files only if the diff is insufficient to understand the context.
-          4. Review the changes for: correctness/bugs, security concerns, performance issues, style violations (per CLAUDE.md), and missing test coverage.
+          2. Run `gh pr diff` to get the full diff. This is your sole input — review ONLY the lines changed in this PR.
+          3. Only if a changed line is ambiguous without context, read that specific file. Do not read files that are not in the diff.
+          4. Review the diff for: correctness/bugs, security concerns, performance issues, style violations (per CLAUDE.md), and missing test coverage.
           5. Post your findings:
              a. For each issue, use `mcp__github_inline_comment__create_inline_comment` to comment on the specific diff line.
                 Prefix each comment with [BLOCKING], [Style], or [Suggestion].
              b. After all inline comments, run `gh pr comment` with a short summary (5-10 lines max) listing the issues found and an overall assessment.
              c. If the PR is clean, post only a brief approving summary — no inline comments needed.
-          6. Stop. Do not explore the broader codebase, run tests, or take any other actions.
+          6. Stop immediately.
 
           Quality guidelines:
           - Do NOT invent problems. Only flag real issues visible in the diff.
