@@ -18,7 +18,7 @@ on:
       max_turns:
         description: "Maximum number of agentic turns"
         type: string
-        default: "15"
+        default: "30"
     secrets:
       CLAUDE_CODE_ROLE_ARN:
         required: true
