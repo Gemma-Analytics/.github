@@ -84,6 +84,7 @@ jobs:
           use_bedrock: "true"
           allowed_bots: "gemma-claude-assistant[bot]"
           prompt: ${{ steps.prompt.outputs.value }}
+          show_full_output: true
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
