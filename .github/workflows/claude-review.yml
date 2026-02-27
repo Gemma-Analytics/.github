@@ -87,6 +87,7 @@ jobs:
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash(git *),Bash(grep *),Bash(find *)"
 
       - name: Post session cost
         if: always() && steps.claude.outputs.execution_file
