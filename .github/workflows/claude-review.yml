@@ -90,7 +90,7 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           use_bedrock: "true"
-          allowed_bots: "gemma-claude-assistant[bot]"
+          allowed_bots: "gemma-claude-assistant[bot],gemmbot"
           prompt: ${{ steps.prompt.outputs.value }}
           claude_args: >-
             --model ${{ inputs.model }}
