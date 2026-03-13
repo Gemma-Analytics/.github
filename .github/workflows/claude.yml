@@ -29,7 +29,6 @@ on:
 
 jobs:
   claude:
-    if: false  # Temporarily disabled while setting up managed Code Review
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
