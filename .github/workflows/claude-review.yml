@@ -28,7 +28,7 @@ on:
         required: true
 
 concurrency:
-  group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
@@ -51,10 +51,26 @@ jobs:
           role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
 
+      - name: Acknowledge trigger
+        if: github.event.comment.id
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
       - name: Build review prompt
         id: prompt
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ADDITIONAL: ${{ inputs.additional_instructions }}
         run: |
           cat > /tmp/review_prompt.txt << 'BASEPROMPT'
           You are a code reviewer. Be efficient — minimize tool calls.
@@ -83,9 +99,15 @@ jobs:
 
           sed -i "s/PR_NUMBER_PLACEHOLDER/$PR_NUMBER/g" /tmp/review_prompt.txt
 
-          ADDITIONAL="${{ inputs.additional_instructions }}"
           if [ -n "$ADDITIONAL" ]; then
             printf '\nAdditionally, check for:\n%s\n' "$ADDITIONAL" >> /tmp/review_prompt.txt
+          fi
+
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            EXTRA=$(printf '%s' "$COMMENT_BODY" | sed -E 's/^[[:space:]]*@claude review[[:space:]]*//')
+            if [ -n "$EXTRA" ] && [ "$EXTRA" != "$COMMENT_BODY" ]; then
+              printf '\nUser-requested focus for this review:\n%s\n' "$EXTRA" >> /tmp/review_prompt.txt
+            fi
           fi
 
           {
