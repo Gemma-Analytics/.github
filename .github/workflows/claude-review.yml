@@ -127,26 +127,12 @@ jobs:
                - Never drop a blocker silently; if the diff is enormous, post the
                  remainder as a grouped list in the summary.
             b. Summary comment via Write → /tmp/summary.md → `gh pr comment PR_NUMBER_PLACEHOLDER --body-file /tmp/summary.md`.
-               Use this EXACT template (omit section only if literally nothing to
-               say; never skip the Blocking header):
-
-                  ## Blocking
-                  <bullet list or "none">
-                  ## Correctness
-                  ## Security
-                  ## Reliability
-                  ## Data integrity
-                  ## Performance
-                  ## Dependencies
-                  ## Tests
-                  ## Docs
-                  ## Style
-                  ## Suggestions
-
-               Every blocker already posted inline must also be enumerated here so
-               the author has one complete list to work from.
-            c. If truly clean: a brief approving summary with "## Blocking: none",
-               no inline comments.
+               Format:
+               - Line 1: a 1-2 sentence plain-English verdict (e.g. "Looks good." or "One blocking issue with the token refresh path.").
+               - If there are findings: add `---` on the next line, then one **Bold** heading per topic (e.g. **Blocking**, **Security**, **Performance**) with its findings below. Omit any topic that has no findings entirely.
+               - If the PR is clean: only the verdict sentence — no separator, no sections.
+               Every blocker already posted inline must also appear here so the author has one complete list.
+            c. If truly clean: a brief approving sentence only — no inline comments, no sections.
 
           Step 6 — Stop.
 
