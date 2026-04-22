@@ -110,7 +110,7 @@ All three secrets must be available in the repo (or inherited from the org). The
 | `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. Change to use a different Claude model (e.g. `eu.anthropic.claude-opus-4-7` for harder reviews). |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. All Gemma infra is in `eu-central-1`; only change if a repo's workload is in another region. |
 | `additional_instructions` | string | _(empty)_ | Repo-specific review rules appended to the base prompt. Use one bullet per line. Claude checks these on top of the standard review criteria. |
-| `max_turns` | string | `30` | Maximum agentic turns. Caps cost on large diffs. Rarely needs changing. |
+| `max_turns` | string | `50` | Maximum agentic turns. Caps cost on large diffs; raised to 50 to support exhaustive category sweeps. |
 
 ### `claude.yml` inputs
 
@@ -124,6 +124,10 @@ All three secrets must be available in the repo (or inherited from the org). The
 ---
 
 ## How triggers work
+
+### Review philosophy
+
+The review is one-shot: auto-fires on PR open and draft→ready; new commits do NOT retrigger it. Re-review requires an explicit `@claude review` comment. The prompt enforces a 9-category sweep with a mandatory completeness self-check, so all blocking issues are surfaced in the first pass rather than drip-fed across rounds. If you observe repeated drip-feed rounds across multiple PRs, treat that as a prompt regression and flag it.
 
 ### Automatic review (on PR events)
 
