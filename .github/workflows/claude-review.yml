@@ -18,7 +18,7 @@ on:
       max_turns:
         description: "Maximum number of agentic turns"
         type: string
-        default: "30"
+        default: "50"
     secrets:
       CLAUDE_CODE_ROLE_ARN:
         required: true
@@ -28,7 +28,7 @@ on:
         required: true
 
 concurrency:
-  group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
@@ -51,41 +51,118 @@ jobs:
           role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
 
+      - name: Acknowledge trigger
+        if: github.event.comment.id
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
       - name: Build review prompt
         id: prompt
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ADDITIONAL: ${{ inputs.additional_instructions }}
         run: |
           cat > /tmp/review_prompt.txt << 'BASEPROMPT'
-          You are a code reviewer. Be efficient — minimize tool calls.
-          IMPORTANT: Only review the PR diff. Do NOT explore the broader codebase, read unrelated files, run tests, or take any actions beyond what is listed below.
+          You are a code reviewer performing a ONE-SHOT review of PR #PR_NUMBER_PLACEHOLDER.
 
-          IMPORTANT: You are reviewing PR #PR_NUMBER_PLACEHOLDER. Always use this number in all gh commands.
+          IMPORTANT — one-shot context: this review only runs on PR open, draft→ready,
+          or explicit `@claude review` comment. New commits do NOT retrigger it. List
+          every blocking issue now, including second-order consequences of likely fixes.
+          If the author has to open another round, the review failed.
 
-          Follow these steps in order:
+          Step 1 — Read conventions
+            - `cat CLAUDE.md` (skip if missing). These rules are authoritative for [Style].
+            - `gh pr diff PR_NUMBER_PLACEHOLDER` to get the full diff. Always use this
+              PR number in every `gh` call.
 
-          1. Run `cat CLAUDE.md` to read repo conventions (skip if it doesn't exist).
-          2. Run `gh pr diff PR_NUMBER_PLACEHOLDER` to get the full diff. This is your sole input — review ONLY the lines changed in this PR.
-          3. Only if a changed line is ambiguous without context, read that specific file. Do not read files that are not in the diff.
-          4. Review the diff for: correctness/bugs, security concerns, performance issues, style violations (per CLAUDE.md), and missing test coverage.
-          5. Post your findings:
-             a. For each issue, use `mcp__github_inline_comment__create_inline_comment` to comment on the specific diff line.
-                Prefix each comment with [BLOCKING], [Style], or [Suggestion].
-             b. After all inline comments, use the Write tool to create /tmp/summary.md with a short summary (5-10 lines), then run `gh pr comment PR_NUMBER_PLACEHOLDER --body-file /tmp/summary.md` as a separate Bash command.
-             c. If the PR is clean, post only a brief approving summary (no inline comments needed).
-          6. Stop immediately.
+          Step 2 — Bounded exploration (allowed, not required)
+            You MAY read up to 5 files outside the diff, but only for flow-dependent
+            analysis: tracing inputs into SQL/shell/template builders, checking
+            auth-token lifetime and refresh, confirming error-handling flow, verifying
+            dependency/lockfile consistency, or inspecting imports of new modules.
+            Do NOT read unrelated files, run tests, or browse the codebase.
 
-          Quality guidelines:
-          - Do NOT invent problems. Only flag real issues visible in the diff.
-          - Limit to at most 8 inline comments. Focus on the most impactful issues.
-          - Do not suggest stylistic changes unless they violate explicit CLAUDE.md rules.
+          Step 3 — Category sweep (traverse EVERY category; output per-category
+          findings or the literal word "none" — a silent skip is a bug)
+
+            1. Correctness — bugs, wrong defaults, type/None handling, off-by-one
+            2. Security — secrets or real credentials committed (examine every
+               toml/json/env-like file); injection (SQL, shell, template, path);
+               auth token handling; PII in logs
+            3. Reliability — error handling, retries (beware retry-on-generator
+               duplication for replace/full-refresh resources), timeouts, resource
+               leaks (file handles, tempdirs, connections), concurrency/races
+            4. Data integrity — schema contracts, idempotency, incremental cursor
+               correctness, write disposition semantics
+            5. Performance — N+1 work, unbounded memory, blocking I/O in hot paths
+            6. Dependencies — lockfile sync with pyproject.toml/package.json,
+               dev-vs-prod placement, required tools declared in CLAUDE.md present
+            7. Tests — missing coverage for new logic-bearing code
+            8. Docs — accuracy vs behavior (README claims that code doesn't deliver)
+            9. Style — only when it violates an explicit CLAUDE.md rule
+
+          Step 4 — Completeness self-check
+            Before posting anything, re-scan the diff once against the 9 categories.
+            If a category surfaces new findings, add them.
+
+          Step 5 — Post findings
+            a. Inline comments via mcp__github_inline_comment__create_inline_comment.
+               Prefix every comment with [BLOCKING], [Style], or [Suggestion].
+               - Post ALL blockers inline — no cap.
+               - Cap [Suggestion] inline comments at 8 (pick the most impactful).
+               - Never drop a blocker silently; if the diff is enormous, post the
+                 remainder as a grouped list in the summary.
+            b. Summary comment via Write → /tmp/summary.md → `gh pr comment PR_NUMBER_PLACEHOLDER --body-file /tmp/summary.md`.
+               Use this EXACT template (omit section only if literally nothing to
+               say; never skip the Blocking header):
+
+                  ## Blocking
+                  <bullet list or "none">
+                  ## Correctness
+                  ## Security
+                  ## Reliability
+                  ## Data integrity
+                  ## Performance
+                  ## Dependencies
+                  ## Tests
+                  ## Docs
+                  ## Style
+                  ## Suggestions
+
+               Every blocker already posted inline must also be enumerated here so
+               the author has one complete list to work from.
+            c. If truly clean: a brief approving summary with "## Blocking: none",
+               no inline comments.
+
+          Step 6 — Stop.
+
+          Quality rules
+            - Do NOT invent problems. Only flag real issues you can point to in the diff.
+            - Do NOT suggest stylistic changes unless CLAUDE.md mandates them.
+            - Prefer specific line references over generalities.
           BASEPROMPT
 
           sed -i "s/PR_NUMBER_PLACEHOLDER/$PR_NUMBER/g" /tmp/review_prompt.txt
 
-          ADDITIONAL="${{ inputs.additional_instructions }}"
           if [ -n "$ADDITIONAL" ]; then
-            printf '\nAdditionally, check for:\n%s\n' "$ADDITIONAL" >> /tmp/review_prompt.txt
+            printf '\nRepo-specific checks (apply in addition to the base categories above):\n%s\n' "$ADDITIONAL" >> /tmp/review_prompt.txt
+          fi
+
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            EXTRA=$(printf '%s' "$COMMENT_BODY" | sed -E 's/^[[:space:]]*@claude review[[:space:]]*//')
+            if [ -n "$EXTRA" ] && [ "$EXTRA" != "$COMMENT_BODY" ]; then
+              printf '\nUser-requested focus for this review:\n%s\n' "$EXTRA" >> /tmp/review_prompt.txt
+            fi
           fi
 
           {
