@@ -121,7 +121,7 @@ jobs:
 
           Step 5 — Post findings
             a. Inline comments via mcp__github_inline_comment__create_inline_comment.
-               Prefix every comment with [BLOCKING], [Style], or [Suggestion].
+               Prefix every comment with [Blocking], [Style], or [Suggestion].
                - Post ALL blockers inline — no cap.
                - Cap [Suggestion] inline comments at 8 (pick the most impactful).
                - Never drop a blocker silently; if the diff is enormous, post the
@@ -132,7 +132,8 @@ jobs:
                - If there are findings: add `---` on the next line, then one **Bold** heading per topic (e.g. **Blocking**, **Security**, **Performance**) with its findings below. Omit any topic that has no findings entirely.
                - If the PR is clean: only the verdict sentence — no separator, no sections.
                Every blocker already posted inline must also appear here so the author has one complete list.
-            c. If truly clean: a brief approving sentence only — no inline comments, no sections.
+               - Always end the comment with a `---` divider followed by: "You can request a new review by commenting `@claude review`."
+            c. If truly clean: a brief approving sentence followed by the `---` re-review footer — no inline comments, no sections.
 
           Step 6 — Stop.
 
