@@ -1,6 +1,6 @@
 # Gemma Analytics — Shared GitHub Workflows
 
-Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add two thin wrapper files to any repo to get Claude-powered code review and an `@claude` mention responder.
+Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add thin wrapper files to any repo to get Claude-powered code review, an `@claude` mention responder, and scheduled security audits.
 
 ---
 
@@ -10,14 +10,15 @@ Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add two 
 |---|---|
 | [`claude-review.yml`](.github/workflows/claude-review.yml) | Automated code review when a PR is opened or marked ready for review; can also be triggered on demand by commenting `@claude review` on a PR |
 | [`claude.yml`](.github/workflows/claude.yml) | General-purpose `@claude` mention handler — answer questions, help with issues, respond to inline review comments |
+| [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled security audit — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review |
 
-Both workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
+All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
 
 ---
 
 ## Quick start — adding workflows to a new repo
 
-Create two files in your repo's `.github/workflows/` directory.
+Create the relevant files in your repo's `.github/workflows/` directory.
 
 ### 1. Auto-review on PR open (`claude-review.yml`)
 
@@ -87,6 +88,38 @@ jobs:
 
 > **Important:** the negation `!startsWith(..., '@claude review')` in `claude.yml` ensures that an `@claude review` comment routes to the review workflow, not the generic responder. Keep both files in sync.
 
+### 3. Scheduled security audit (`claude-audit.yml`)
+
+Creates a dated Markdown report in a `reports/` directory and opens a PR for it — monthly by default, or any time via manual dispatch. Uses the `gemma-deployment-security` plugin from `gemma-agentic-toolkit` to auto-detect and run applicable audit skills (Docker Compose, Dockerfile, CI/CD workflows, Airflow config, infrastructure-as-code, pre-commit).
+
+```yaml
+name: Scheduled Security Audit
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"   # 06:00 UTC on the 1st of every month
+  workflow_dispatch:        # also triggerable manually from the Actions tab
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  audit:
+    uses: Gemma-Analytics/.github/.github/workflows/claude-audit.yml@main
+    with:
+      audits: "deployment-security"
+    secrets:
+      CLAUDE_CODE_ROLE_ARN: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+      GEMMA_CLAUDE_ASSISTANT_APP_ID: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+```
+
+Commit this as `.github/workflows/scheduled-audit.yml`. The workflow needs `contents: write` and `pull-requests: write` (in addition to `id-token: write` for OIDC) because it opens a PR with the report. No new secrets or IAM changes are required — the same three secrets already configured for PR reviews cover the audit too.
+
+> **Note:** `secrets: inherit` does not work cross-org. All three secrets must be passed explicitly, as shown above.
+
 ---
 
 ## Required secrets
@@ -120,6 +153,17 @@ All three secrets must be available in the repo (or inherited from the org). The
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `prompt` | string | _(empty)_ | When empty, the action reads the triggering comment/issue body and handles `@claude` mentions natively. Pass an explicit prompt only for special routing (rarely needed). |
 | `max_turns` | string | _(empty — action default)_ | When blank, the action uses its built-in default. |
+
+### `claude-audit.yml` inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `audits` | string | `deployment-security` | Audit types to run (space or newline separated). Currently supported: `deployment-security`. More audit types will be added here as new plugins ship (e.g. `dbt-project-review`). |
+| `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
+| `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
+| `max_turns` | string | `60` | Maximum agentic turns. A full deployment-security audit runs ~30–50 turns; raised to 60 to support larger repos. |
+| `report_dir` | string | `reports` | Directory under the repo root where dated report files are written (`reports/security-audit-report-YYYY-MM-DD.md`). |
+| `toolkit_ref` | string | `main` | `gemma-agentic-toolkit` branch, tag, or SHA to check out for skills. Pin to a release tag (e.g. `gemma-deployment-security@1.1.0`) for reproducible audits. |
 
 ---
 
@@ -182,3 +226,5 @@ Tags are not currently cut automatically — coordinate with the infrastructure 
 - **Comment body injection:** the `github.event.comment.body` value (user-supplied) is handled via shell `env:` variables, never interpolated directly into `run:` scripts. This prevents command injection from maliciously crafted comments.
 - **Fork PRs:** OIDC credentials and secrets are not available to workflows triggered by PRs from forks. Review will silently fail for fork PRs — this is a known GitHub limitation.
 - **Bot loops:** the `allowed_bots` setting in both central workflows permits only `gemma-claude-assistant[bot]` and `gemmbot`. Claude's own review summary comments will not re-trigger another review.
+- **Audit tool scope:** `claude-audit.yml` restricts Claude to read-only tools (`find`, `grep`, `cat`, `ls`, `Read`, `Glob`, `Grep`) plus a single `Write` for the report file. No `gh` CLI, no network calls, no git commands — PR creation is handled deterministically by `peter-evans/create-pull-request`, not by Claude.
+- **Scheduled runs and OIDC:** `schedule` and `workflow_dispatch` runs on the default branch emit an OIDC `sub` claim of `repo:<org>/<repo>:ref:refs/heads/main`. All current `allow_all_repos` clients have trust policies scoped to `repo:<org>/*`, which matches — no Terraform changes are required.
