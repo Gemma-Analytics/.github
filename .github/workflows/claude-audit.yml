@@ -58,13 +58,21 @@ jobs:
           app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
           private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
 
+      - name: Generate GitHub App token (Gemma-Analytics)
+        id: gemma-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+          owner: Gemma-Analytics
+
       - name: Checkout gemma-agentic-toolkit (audit skills)
         uses: actions/checkout@v4
         with:
           repository: Gemma-Analytics/gemma-agentic-toolkit
           ref: ${{ inputs.toolkit_ref }}
           path: .gemma-toolkit
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.gemma-token.outputs.token }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
