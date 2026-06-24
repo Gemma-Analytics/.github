@@ -24,7 +24,7 @@ on:
       report_dir:
         description: "Directory under the repo root where audit reports are written"
         type: string
-        default: "reports"
+        default: "docs/audit-reports"
       toolkit_ref:
         description: >
           gemma-agentic-toolkit branch, tag, or SHA to check out.

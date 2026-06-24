@@ -162,7 +162,7 @@ All three secrets must be available in the repo (or inherited from the org). The
 | `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `max_turns` | string | `60` | Maximum agentic turns. A full deployment-security audit runs ~30–50 turns; raised to 60 to support larger repos. |
-| `report_dir` | string | `reports` | Directory under the repo root where dated report files are written (`reports/security-audit-report-YYYY-MM-DD.md`). |
+| `report_dir` | string | `docs/audit-reports` | Directory under the repo root where dated report files are written (`docs/audit-reports/security-audit-report-YYYY-MM-DD.md`). |
 | `toolkit_ref` | string | `main` | `gemma-agentic-toolkit` branch, tag, or SHA to check out for skills. Pin to a release tag (e.g. `gemma-deployment-security@1.1.0`) for reproducible audits. |
 
 ---
