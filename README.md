@@ -6,11 +6,11 @@ Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add thin
 
 ## Workflows
 
-| Workflow | What it does |
-|---|---|
-| [`claude-review.yml`](.github/workflows/claude-review.yml) | Automated code review when a PR is opened or marked ready for review; can also be triggered on demand by commenting `@claude review` on a PR |
-| [`claude.yml`](.github/workflows/claude.yml) | General-purpose `@claude` mention handler — answer questions, help with issues, respond to inline review comments |
-| [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled security audit — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review |
+| Workflow | What it does | Docs |
+|---|---|---|
+| [`claude-review.yml`](.github/workflows/claude-review.yml) | Automated code review when a PR is opened or marked ready for review; can also be triggered on demand by commenting `@claude review` on a PR | [docs/claude-review.md](docs/claude-review.md) |
+| [`claude.yml`](.github/workflows/claude.yml) | General-purpose `@claude` mention handler — answer questions, help with issues, respond to inline review comments | [docs/claude.md](docs/claude.md) |
+| [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled security audit — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review | [docs/claude-audit.md](docs/claude-audit.md) |
 
 All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
 
