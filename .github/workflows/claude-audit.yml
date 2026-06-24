@@ -1,0 +1,243 @@
+name: Claude Security Audit
+
+on:
+  workflow_call:
+    inputs:
+      audits:
+        description: >
+          Audit types to run (space or newline separated).
+          Currently supported: deployment-security
+        type: string
+        default: "deployment-security"
+      model:
+        description: "Bedrock model ID"
+        type: string
+        default: "eu.anthropic.claude-sonnet-4-6"
+      aws_region:
+        description: "AWS region for Bedrock OIDC"
+        type: string
+        default: "eu-central-1"
+      max_turns:
+        description: "Maximum number of agentic turns"
+        type: string
+        default: "60"
+      report_dir:
+        description: "Directory under the repo root where audit reports are written"
+        type: string
+        default: "reports"
+      toolkit_ref:
+        description: >
+          gemma-agentic-toolkit branch, tag, or SHA to check out.
+          Pin to a release tag for reproducible audits (e.g. gemma-deployment-security@1.1.0).
+        type: string
+        default: "main"
+    secrets:
+      CLAUDE_CODE_ROLE_ARN:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_ID:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
+        required: true
+
+concurrency:
+  group: claude-audit-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+
+      - name: Checkout gemma-agentic-toolkit (audit skills)
+        uses: actions/checkout@v4
+        with:
+          repository: Gemma-Analytics/gemma-agentic-toolkit
+          ref: ${{ inputs.toolkit_ref }}
+          path: .gemma-toolkit
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Prepare skills and report directory
+        id: prep
+        env:
+          REPORT_DIR: ${{ inputs.report_dir }}
+        run: |
+          # Install deployment-security skills into .claude/skills/ for auto-discovery.
+          # ${CLAUDE_SKILL_DIR} in each SKILL.md will resolve to .claude/skills/<skill-name>.
+          mkdir -p .claude/skills
+          cp -r .gemma-toolkit/plugins/gemma-deployment-security/skills/. .claude/skills/
+
+          # Ensure the report output directory exists so Write can create the file there.
+          mkdir -p "$REPORT_DIR"
+
+          TODAY=$(date -u +%Y-%m-%d)
+          REPORT_PATH="${REPORT_DIR}/security-audit-report-${TODAY}.md"
+
+          echo "today=$TODAY" >> "$GITHUB_OUTPUT"
+          echo "report_path=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Build audit prompt
+        id: prompt
+        env:
+          REPORT_PATH: ${{ steps.prep.outputs.report_path }}
+          AUDITS: ${{ inputs.audits }}
+        run: |
+          cat > /tmp/audit_prompt.txt << 'BASEPROMPT'
+          You are performing an automated security audit of this repository.
+
+          ## Instructions
+
+          Read `.claude/skills/generate-security-report/SKILL.md` and follow its steps exactly.
+
+          Two path substitutions apply in CI:
+          - `${CLAUDE_SKILL_DIR}` → `.claude/skills/generate-security-report`
+          - "current working directory" → the repository root
+
+          Write the completed report to: REPORT_PATH_PLACEHOLDER
+
+          ## Scope
+
+          Audit type requested: AUDITS_PLACEHOLDER
+
+          For `deployment-security`: auto-detect applicable sub-audits per the detection
+          table in the SKILL.md (docker-compose, Dockerfile, .github/workflows/, .tf
+          files, Airflow indicators, .pre-commit-config.yaml).
+
+          Always skip `audit-server-config` in this CI run. Record it in the Audit
+          Scope table as "Deferred — run manually with SSH access or in guided mode."
+
+          ## Hard rules
+
+          - Write only the single report file at REPORT_PATH_PLACEHOLDER. Do not modify
+            any other files in the repository.
+          - Never include actual secret values in the report — only file locations,
+            variable names, and whether values appear hardcoded vs. environment-referenced.
+          - Do not commit, push, open pull requests, or call any GitHub CLI commands.
+          - Read-only audit — do not modify any source files.
+          BASEPROMPT
+
+          # Substitute placeholders via env vars — never via shell interpolation in run:
+          sed -i "s|REPORT_PATH_PLACEHOLDER|$REPORT_PATH|g" /tmp/audit_prompt.txt
+          sed -i "s|AUDITS_PLACEHOLDER|$AUDITS|g" /tmp/audit_prompt.txt
+
+          {
+            echo 'value<<PROMPT_EOF'
+            cat /tmp/audit_prompt.txt
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude audit
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          use_bedrock: "true"
+          allowed_bots: "gemma-claude-assistant[bot],gemmbot"
+          prompt: ${{ steps.prompt.outputs.value }}
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Read,Glob,Grep,Write"
+
+      - name: Move report if written to repo root
+        # Safety net: if Claude writes to the CWD root despite the prompt, move it.
+        env:
+          REPORT_PATH: ${{ steps.prep.outputs.report_path }}
+          TODAY: ${{ steps.prep.outputs.today }}
+          REPORT_DIR: ${{ inputs.report_dir }}
+        run: |
+          ROOT_REPORT="security-audit-report-${TODAY}.md"
+          if [ -f "$ROOT_REPORT" ] && [ ! -f "$REPORT_PATH" ]; then
+            echo "Report found at repo root — moving to $REPORT_PATH"
+            mv "$ROOT_REPORT" "$REPORT_PATH"
+          fi
+
+      - name: Remove toolkit checkout from workspace
+        # Clean up before peter-evans stages files so nothing from .gemma-toolkit
+        # or .claude/skills ends up in the PR commit.
+        if: always()
+        run: rm -rf .gemma-toolkit .claude
+
+      - name: Build PR body
+        id: pr-body
+        if: always()
+        env:
+          REPORT_PATH: ${{ steps.prep.outputs.report_path }}
+          TODAY: ${{ steps.prep.outputs.today }}
+        run: |
+          if [ ! -f "$REPORT_PATH" ]; then
+            {
+              echo "⚠️ **Audit workflow completed but no report file was generated.**"
+              echo ""
+              echo "Check the [Actions log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) for details."
+            } > /tmp/pr_body.md
+            exit 0
+          fi
+
+          REPO_BASENAME=$(basename "$GITHUB_REPOSITORY")
+
+          {
+            echo "Automated monthly security audit for \`${REPO_BASENAME}\` — ${TODAY}."
+            echo ""
+            # Extract everything between ## Executive Summary and the next ## heading.
+            awk '/^## Executive Summary/{found=1;next} found && /^## /{exit} found{print}' "$REPORT_PATH"
+            echo ""
+            echo "---"
+            echo "Full report: \`${REPORT_PATH}\`"
+            echo ""
+            echo "> Generated by [Claude Security Audit]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          } > /tmp/pr_body.md
+
+      - name: Create pull request
+        id: pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: audit/security-${{ steps.prep.outputs.today }}
+          title: "🔒 Security audit ${{ steps.prep.outputs.today }}"
+          body-path: /tmp/pr_body.md
+          commit-message: "chore(audit): security audit report ${{ steps.prep.outputs.today }}"
+          add-paths: ${{ inputs.report_dir }}
+          delete-branch: false
+
+      - name: Post session cost to PR
+        if: always() && steps.claude.outputs.execution_file && steps.pr.outputs.pull-request-number
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const file = '${{ steps.claude.outputs.execution_file }}';
+            if (!fs.existsSync(file)) return;
+
+            const messages = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const result = Array.isArray(messages)
+              ? messages.find(m => m.type === 'result')
+              : messages;
+            if (!result) return;
+
+            const cost = result.total_cost_usd ?? 0;
+            const turns = result.num_turns ?? 0;
+            const duration = result.duration_ms ? Math.round(result.duration_ms / 1000) : 0;
+            const model = '${{ inputs.model }}';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt('${{ steps.pr.outputs.pull-request-number }}'),
+              body: `**Claude audit cost:** \$${cost.toFixed(4)} · ${turns} turns · ${duration}s · \`${model}\``
+            });
