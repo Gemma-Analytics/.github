@@ -1,0 +1,500 @@
+name: Claude Upstream Harvest
+
+# Harvest generalizable patterns from client repos and propose them as code PRs into this
+# (template/reference) repo. Inverse of claude-audit.yml: instead of pushing a checklist
+# down into clients, it pulls innovation up into our references.
+#
+# Two jobs:
+#   detect  — read-only: clone sources, run the detect-upstream-candidates skill, emit a
+#             candidate list (with cross-client corroboration scoring).
+#   harvest — matrix over candidates: run generalize-pattern, mechanically guard the diff
+#             (Gate 1), and open one PR per candidate via peter-evans.
+#
+# Intelligence lives in the gemma-upstream-harvest plugin (gemma-agentic-toolkit).
+# Gate spec: plugins/gemma-upstream-harvest/skills/harvest-upstream-patterns/references/required-ci-gates.md
+
+on:
+  workflow_call:
+    inputs:
+      sources:
+        description: >
+          Client source repos to harvest from, space/newline separated as org/repo.
+          The GitHub App must be installed on each source org with contents:read.
+        type: string
+        required: true
+      mode:
+        description: '"scan" (diff sources vs this template + collect nominated PRs) or "pr" (harvest a single nominated PR via pr_url).'
+        type: string
+        default: "scan"
+      pr_url:
+        description: "When mode=pr, the single client PR URL to harvest (https://github.com/org/repo/pull/N)."
+        type: string
+        default: ""
+      nomination_label:
+        description: "Label on client PRs that nominates them for harvest (scan mode collects these)."
+        type: string
+        default: "upstream-candidate"
+      denylist:
+        description: "Newline-separated globs that are never read or harvested (extends the plugin default; never shrink it)."
+        type: string
+        default: |
+          **/.env*
+          **/*secret*
+          **/*credential*
+          **/*.pem
+          **/*.key
+          **/data/**
+          **/seeds/**
+          **/dags/**
+      ledger_path:
+        description: "Path to the harvest ledger in this repo (dedup record)."
+        type: string
+        default: ".github/harvest-ledger.yml"
+      model:
+        description: "Bedrock model ID."
+        type: string
+        default: "eu.anthropic.claude-sonnet-4-6"
+      aws_region:
+        description: "AWS region for Bedrock OIDC."
+        type: string
+        default: "eu-central-1"
+      max_turns:
+        description: "Maximum agentic turns per Claude run."
+        type: string
+        default: "60"
+      toolkit_ref:
+        description: >
+          gemma-agentic-toolkit ref to load the gemma-upstream-harvest skills from.
+          Pin to a release tag (e.g. gemma-upstream-harvest@1.0.0) for reproducible runs.
+        type: string
+        default: "main"
+    secrets:
+      CLAUDE_CODE_ROLE_ARN:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_ID:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
+        required: true
+
+concurrency:
+  group: claude-harvest-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 — detect (read-only): produce the candidate list
+  # ───────────────────────────────────────────────────────────────────────────
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      ids: ${{ steps.collect.outputs.ids }}
+      count: ${{ steps.collect.outputs.count }}
+    steps:
+      - name: Checkout template repo (the baseline)
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App token (Gemma-Analytics)
+        id: gemma-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+          owner: Gemma-Analytics
+
+      - name: Checkout gemma-agentic-toolkit (harvest skills)
+        uses: actions/checkout@v4
+        with:
+          repository: Gemma-Analytics/gemma-agentic-toolkit
+          ref: ${{ inputs.toolkit_ref }}
+          path: .gemma-toolkit
+          token: ${{ steps.gemma-token.outputs.token }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Fetch source material (cross-org, read-only)
+        id: fetch
+        env:
+          APP_ID: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+          SOURCES: ${{ inputs.sources }}
+          MODE: ${{ inputs.mode }}
+          PR_URL: ${{ inputs.pr_url }}
+          NOMINATION_LABEL: ${{ inputs.nomination_label }}
+        run: |
+          set -euo pipefail
+          mkdir -p .harvest-sources .harvest-nominations
+
+          # Mint a GitHub App JWT (RS256) with openssl — used to obtain per-org
+          # installation tokens. The App is installed on each client org.
+          b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+          now=$(date +%s)
+          header='{"alg":"RS256","typ":"JWT"}'
+          payload="{\"iat\":$((now - 60)),\"exp\":$((now + 540)),\"iss\":\"${APP_ID}\"}"
+          unsigned="$(printf '%s' "$header" | b64).$(printf '%s' "$payload" | b64)"
+          signature=$(printf '%s' "$unsigned" \
+            | openssl dgst -sha256 -sign <(printf '%s' "$APP_PRIVATE_KEY") -binary | b64)
+          JWT="${unsigned}.${signature}"
+
+          # Mint a short-lived installation token scoped to one repo in its org.
+          mint_token() {  # $1=org $2=repo
+            local org="$1" repo="$2" inst_id token
+            inst_id=$(curl -fsSL -H "Authorization: Bearer $JWT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${org}/${repo}/installation" | jq -r '.id')
+            token=$(curl -fsSL -X POST -H "Authorization: Bearer $JWT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/app/installations/${inst_id}/access_tokens" \
+              -d "{\"repositories\":[\"${repo}\"]}" | jq -r '.token')
+            printf '%s' "$token"
+          }
+
+          fetch_pr_diff() {  # $1=org $2=repo $3=pr $4=token
+            curl -fsSL -H "Authorization: token $4" \
+              -H "Accept: application/vnd.github.v3.diff" \
+              "https://api.github.com/repos/$1/$2/pulls/$3" \
+              > ".harvest-nominations/$1__$2-pr$3.diff" || true
+          }
+
+          if [ "$MODE" = "pr" ]; then
+            # Single nominated PR: parse https://github.com/<org>/<repo>/pull/<n>
+            url="${PR_URL%/}"
+            n="${url##*/}"; rest="${url%/pull/*}"
+            repo="${rest##*/}"; org="$(basename "${rest%/*}")"
+            echo "pr mode: org=$org repo=$repo pr=$n"
+            tok=$(mint_token "$org" "$repo")
+            fetch_pr_diff "$org" "$repo" "$n" "$tok"
+            git clone --depth=1 "https://x-access-token:${tok}@github.com/${org}/${repo}" \
+              ".harvest-sources/${org}__${repo}" -q
+          else
+            # scan mode: clone each source + collect its nominated (labeled) PR diffs.
+            for src in $SOURCES; do
+              org="${src%%/*}"; repo="${src#*/}"
+              [ -z "$org" ] || [ -z "$repo" ] && continue
+              echo "scan source: $org/$repo"
+              tok=$(mint_token "$org" "$repo")
+              git clone --depth=1 "https://x-access-token:${tok}@github.com/${org}/${repo}" \
+                ".harvest-sources/${org}__${repo}" -q
+              # Collect PRs carrying the nomination label (issues endpoint returns PRs too).
+              curl -fsSL -H "Authorization: token $tok" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${org}/${repo}/issues?labels=${NOMINATION_LABEL}&state=all&per_page=50" \
+                | jq -r '.[] | select(.pull_request != null) | .number' \
+                | while read -r n; do
+                    [ -n "$n" ] && fetch_pr_diff "$org" "$repo" "$n" "$tok"
+                  done
+            done
+          fi
+
+          echo "Sources cloned:"; ls -1 .harvest-sources || true
+          echo "Nomination diffs:"; ls -1 .harvest-nominations || true
+
+      - name: Gather already-attempted candidate ids
+        # Dedup belt-and-suspenders: any id that already has a harvest/<id> PR (OPEN or
+        # CLOSED) has been seen — don't re-propose it. Combined with the ledger, this means
+        # a closed-unmerged PR is never re-harvested even if the decline-recorder lagged.
+        env:
+          GH_TOKEN: ${{ steps.gemma-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls?state=all&per_page=100" \
+            | jq -r '.[] | .head.ref | select(startswith("harvest/")) | sub("^harvest/";"")' \
+            | sort -u > .harvest-seen-ids.txt || true
+          echo "Already-attempted ids:"; cat .harvest-seen-ids.txt || true
+
+      - name: Prepare harvest skills
+        run: |
+          mkdir -p .claude/skills
+          cp -r .gemma-toolkit/plugins/gemma-upstream-harvest/skills/. .claude/skills/
+
+      - name: Build detect prompt
+        id: prompt
+        env:
+          MODE: ${{ inputs.mode }}
+          LEDGER_PATH: ${{ inputs.ledger_path }}
+          DENYLIST: ${{ inputs.denylist }}
+          NOMINATION_LABEL: ${{ inputs.nomination_label }}
+        run: |
+          cat > /tmp/detect_prompt.txt << 'BASEPROMPT'
+          You are running the DETECT phase of the upstream-harvest loop (read-only).
+
+          Read `.claude/skills/detect-upstream-candidates/SKILL.md` and follow it exactly.
+          Substitutions for this CI run:
+          - `${CLAUDE_PLUGIN_ROOT}` → `.claude` (so references resolve under `.claude/skills/...`)
+          - **Template root** (the baseline): the repository root (current working directory).
+          - **Sources**: the shallow clones under `.harvest-sources/<org>__<repo>/`.
+          - **Nominated PR diffs**: the files under `.harvest-nominations/` (each is one
+            client PR diff already carrying the `NOMINATION_LABEL_PLACEHOLDER` label, or the
+            single PR in `pr` mode). Treat these as human nominations (elevated priority).
+          - **Mode**: MODE_PLACEHOLDER.
+          - **Ledger**: read `LEDGER_PATH_PLACEHOLDER` if it exists (dedup); treat missing as empty.
+          - **Already-attempted ids**: read `.harvest-seen-ids.txt` (one id per line) — these
+            already have a harvest PR (open or closed). Skip any candidate whose id is listed,
+            in addition to ids the ledger marks ported/declined.
+          - **Denylist** (never read/harvest these globs):
+          DENYLIST_PLACEHOLDER
+
+          Score cross-client corroboration as the skill describes: cluster by normalized
+          intent across ALL sources, set confidence single|corroborated, and promote
+          borderline candidates that 2+ clients independently converged on.
+
+          Write the resulting candidate list as JSON conforming to the skill's
+          candidate-schema.json to `candidates.json` in the repository root. Do NOT modify
+          any other file. This phase is strictly read-only except for writing candidates.json.
+          BASEPROMPT
+
+          sed -i "s|MODE_PLACEHOLDER|$MODE|g" /tmp/detect_prompt.txt
+          sed -i "s|LEDGER_PATH_PLACEHOLDER|$LEDGER_PATH|g" /tmp/detect_prompt.txt
+          sed -i "s|NOMINATION_LABEL_PLACEHOLDER|$NOMINATION_LABEL|g" /tmp/detect_prompt.txt
+          # Denylist is multi-line — substitute the bare placeholder token (indentation-agnostic).
+          python3 - "$DENYLIST" << 'PY'
+          import sys
+          dl = sys.argv[1].rstrip()
+          p = "/tmp/detect_prompt.txt"
+          s = open(p).read().replace("DENYLIST_PLACEHOLDER", dl)
+          open(p, "w").write(s)
+          PY
+
+          {
+            echo 'value<<PROMPT_EOF'
+            cat /tmp/detect_prompt.txt
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude detect
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ steps.gemma-token.outputs.token }}
+          use_bedrock: "true"
+          allowed_bots: "gemma-claude-assistant[bot],gemmbot"
+          prompt: ${{ steps.prompt.outputs.value }}
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Bash(diff *),Bash(git diff *),Read,Glob,Grep,Write"
+
+      - name: Collect candidate ids for the matrix
+        id: collect
+        run: |
+          set -euo pipefail
+          if [ ! -f candidates.json ]; then
+            echo "No candidates.json produced — nothing to harvest."
+            echo "ids=[]" >> "$GITHUB_OUTPUT"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ids=$(jq -c '[.candidates[].id]' candidates.json)
+          count=$(jq '.candidates | length' candidates.json)
+          echo "Detected $count candidate(s): $ids"
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Upload candidate list
+        if: steps.collect.outputs.count != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: harvest-candidates
+          path: candidates.json
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 — harvest (matrix): one generalized PR per candidate
+  # ───────────────────────────────────────────────────────────────────────────
+  harvest:
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        id: ${{ fromJSON(needs.detect.outputs.ids) }}
+    steps:
+      - name: Checkout template repo
+        uses: actions/checkout@v4
+
+      - name: Generate GitHub App token (this repo — for PR creation)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+
+      - name: Generate GitHub App token (Gemma-Analytics — for toolkit)
+        id: gemma-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+          owner: Gemma-Analytics
+
+      - name: Checkout gemma-agentic-toolkit (harvest skills)
+        uses: actions/checkout@v4
+        with:
+          repository: Gemma-Analytics/gemma-agentic-toolkit
+          ref: ${{ inputs.toolkit_ref }}
+          path: .gemma-toolkit
+          token: ${{ steps.gemma-token.outputs.token }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Download candidate list
+        uses: actions/download-artifact@v4
+        with:
+          name: harvest-candidates
+
+      - name: Prepare harvest skills
+        run: |
+          mkdir -p .claude/skills
+          cp -r .gemma-toolkit/plugins/gemma-upstream-harvest/skills/. .claude/skills/
+
+      - name: Build generalize prompt
+        id: prompt
+        env:
+          CANDIDATE_ID: ${{ matrix.id }}
+          LEDGER_PATH: ${{ inputs.ledger_path }}
+        run: |
+          cat > /tmp/generalize_prompt.txt << 'BASEPROMPT'
+          You are running the APPLY phase of the upstream-harvest loop for ONE candidate.
+
+          Read `.claude/skills/generalize-pattern/SKILL.md` and follow it exactly.
+          Substitutions for this CI run:
+          - `${CLAUDE_PLUGIN_ROOT}` → `.claude`
+          - **Candidate**: the entry in `candidates.json` whose `id` == "CANDIDATE_ID_PLACEHOLDER".
+            Read `candidates.json`, find that entry, and act on it only.
+          - **Template root**: the repository root (current working directory).
+
+          Hard rules for this run (CI context — these override the skill's Step 6):
+          - Apply only this one candidate's generalized change to the template's target files.
+          - Strip EVERY client specific (names, hosts, values, secrets, business logic).
+          - The PR body must be ANONYMIZED: aggregate counts only, NEVER client repo names or
+            URLs. Write the PR body to `/tmp/pr_body.md`.
+          - Do NOT modify the ledger (`LEDGER_PATH_PLACEHOLDER`) in this run. Ledger state is
+            managed outside the PR: dedup uses existing harvest PRs, and the decline-handler
+            records `ported`/`declined` when this PR is merged or closed. Writing a `proposed`
+            entry here would collide across parallel harvest PRs at merge time.
+          - Do not modify candidates.json or any unrelated file. Touch only the target files
+            and `/tmp/pr_body.md`.
+          BASEPROMPT
+
+          sed -i "s|CANDIDATE_ID_PLACEHOLDER|$CANDIDATE_ID|g" /tmp/generalize_prompt.txt
+          sed -i "s|LEDGER_PATH_PLACEHOLDER|$LEDGER_PATH|g" /tmp/generalize_prompt.txt
+
+          {
+            echo 'value<<PROMPT_EOF'
+            cat /tmp/generalize_prompt.txt
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude generalize
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ steps.app-token.outputs.token }}
+          use_bedrock: "true"
+          allowed_bots: "gemma-claude-assistant[bot],gemmbot"
+          prompt: ${{ steps.prompt.outputs.value }}
+          claude_args: >-
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Read,Glob,Grep,Write,Edit"
+
+      - name: Gate 1 — diff-grep leak guard
+        # Hard gate (required-ci-gates.md). Fail the leg if the staged change leaks any
+        # client identifier from this candidate's sources, a secret-shaped string, or a
+        # denylisted path. Belt-and-suspenders on top of the skill's own self-check.
+        env:
+          CANDIDATE_ID: ${{ matrix.id }}
+        run: |
+          set -euo pipefail
+          # candidates.json + the harvest working dirs must NOT be part of the change.
+          rm -rf .gemma-toolkit .claude .harvest-sources .harvest-nominations candidates.json .harvest-seen-ids.txt
+          git add -A
+          DIFF=$(git diff --cached)
+
+          if [ -z "$DIFF" ]; then
+            echo "No change produced for $CANDIDATE_ID — skipping (likely aborted/ungeneralizable)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 1) client identifiers from this candidate's sources. The org (before "/") is the
+          #    sensitive identity; grep the proposed diff for each client org name.
+          ORGS=$(jq -r --arg id "$CANDIDATE_ID" \
+            '.candidates[] | select(.id==$id) | .sources[].repo' candidates.json \
+            | cut -d/ -f1 | sort -u || true)
+          LEAK=0
+          while IFS= read -r org; do
+            [ -z "$org" ] && continue
+            if printf '%s' "$DIFF" | grep -qiF "$org"; then
+              echo "::error::Leak guard: client org identifier '$org' present in the proposed diff for $CANDIDATE_ID"
+              LEAK=1
+            fi
+          done <<< "$ORGS"
+
+          # 2) secret-shaped strings
+          if printf '%s' "$DIFF" | grep -qiE '(BEGIN [A-Z ]*PRIVATE KEY|aws_secret_access_key|xox[baprs]-|ghp_[A-Za-z0-9]{20,}|password\s*[:=]\s*["'\''][^"'\'' ]{6,})'; then
+            echo "::error::Leak guard: secret-shaped string present in the proposed diff for $CANDIDATE_ID"
+            LEAK=1
+          fi
+
+          # 3) denylisted paths touched
+          if git diff --cached --name-only | grep -qiE '(\.env|secret|credential|\.pem$|\.key$|(^|/)(data|seeds|dags)/)'; then
+            echo "::error::Leak guard: a denylisted path was modified for $CANDIDATE_ID"
+            LEAK=1
+          fi
+
+          [ "$LEAK" -eq 0 ] || { echo "Leak guard FAILED — not opening a PR."; exit 1; }
+          echo "Leak guard passed."
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        id: guard
+
+      - name: Open pull request
+        if: steps.guard.outputs.skip == 'false'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: harvest/${{ matrix.id }}
+          title: "🌱 Harvest: ${{ matrix.id }}"
+          body-path: /tmp/pr_body.md
+          commit-message: "feat(harvest): ${{ matrix.id }}"
+          labels: harvest
+          delete-branch: false
+
+      - name: Post session cost to PR
+        if: always() && steps.guard.outputs.skip == 'false' && steps.claude.outputs.execution_file
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const file = '${{ steps.claude.outputs.execution_file }}';
+            if (!fs.existsSync(file)) return;
+            const messages = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const result = Array.isArray(messages) ? messages.find(m => m.type === 'result') : messages;
+            if (!result) return;
+            const cost = result.total_cost_usd ?? 0;
+            const turns = result.num_turns ?? 0;
+            const duration = result.duration_ms ? Math.round(result.duration_ms / 1000) : 0;
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner, repo: context.repo.repo,
+              head: `${context.repo.owner}:harvest/${{ matrix.id }}`, state: 'open'
+            });
+            if (!prs.data.length) return;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: prs.data[0].number,
+              body: `**Claude harvest cost:** \$${cost.toFixed(4)} · ${turns} turns · ${duration}s · \`${{ inputs.model }}\``
+            });

@@ -1,0 +1,101 @@
+name: Harvest Decline Handler
+
+# Gate 2 of the upstream-harvest loop (required-ci-gates.md): when a harvest PR is closed
+# WITHOUT being merged, record the candidate as `declined` in the ledger so detect never
+# re-proposes it. Merged harvest PRs are flipped to `ported`.
+#
+# Called by a thin wrapper in the template repo, triggered on `pull_request: [closed]`.
+# Safe to no-op: it only acts on PRs whose head branch is `harvest/<id>`.
+
+on:
+  workflow_call:
+    inputs:
+      ledger_path:
+        description: "Path to the harvest ledger in the template repo."
+        type: string
+        default: ".github/harvest-ledger.yml"
+    secrets:
+      GEMMA_CLAUDE_ASSISTANT_APP_ID:
+        required: true
+      GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY:
+        required: true
+
+jobs:
+  record:
+    # Only harvest branches; ignore everything else.
+    if: startsWith(github.event.pull_request.head.ref, 'harvest/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (default branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
+          private-key: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
+
+      - name: Update ledger status
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LEDGER_PATH: ${{ inputs.ledger_path }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          ID="${HEAD_REF#harvest/}"
+          if [ "$MERGED" = "true" ]; then NEW_STATUS="ported"; else NEW_STATUS="declined"; fi
+          echo "Recording candidate '$ID' as '$NEW_STATUS' (PR #$PR_NUMBER)."
+
+          if [ ! -f "$LEDGER_PATH" ]; then
+            echo "Ledger $LEDGER_PATH not found — creating with entries:."
+            printf 'entries:\n' > "$LEDGER_PATH"
+          fi
+
+          # Flip an existing entry's status, or append a minimal one. Uses Python's yaml so
+          # we never corrupt the file with brittle sed.
+          python3 - "$LEDGER_PATH" "$ID" "$NEW_STATUS" "$PR_NUMBER" << 'PY'
+          import sys, datetime
+          try:
+              import yaml
+          except ImportError:
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "pyyaml"])
+              import yaml
+
+          path, cid, status, pr = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          doc = yaml.safe_load(open(path)) or {}
+          entries = doc.get("entries") or []
+          for e in entries:
+              if e.get("id") == cid:
+                  e["status"] = status
+                  e.setdefault("note", f"auto-recorded from PR #{pr}")
+                  break
+          else:
+              entries.append({
+                  "id": cid,
+                  "status": status,
+                  "note": f"auto-recorded from PR #{pr}",
+              })
+          doc["entries"] = entries
+          with open(path, "w") as f:
+              yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False)
+          PY
+
+          if git diff --quiet -- "$LEDGER_PATH"; then
+            echo "Ledger already up to date — nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "gemma-claude-assistant[bot]"
+          git config user.email "gemma-claude-assistant[bot]@users.noreply.github.com"
+          git add "$LEDGER_PATH"
+          git commit -m "chore(harvest): record ${ID} as ${NEW_STATUS} (#${PR_NUMBER})"
+          # Push directly to the default branch. If branch protection rejects this, switch
+          # the wrapper to open a PR instead (see docs/claude-harvest.md).
+          git push origin "HEAD:${{ github.event.repository.default_branch }}" || \
+            echo "::warning::Could not push ledger update (branch protection?). Record '$ID=$NEW_STATUS' manually."
