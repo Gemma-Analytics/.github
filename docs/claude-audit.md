@@ -50,8 +50,9 @@ Client repo                    Gemma-Analytics/.github              gemma-agenti
 Any plugin can be an audit type if its orchestrator skill satisfies this contract — that's
 what lets one workflow drive all of them:
 
-1. **`disable-model-invocation: true`**, `argument-hint: "[path-to-repo-root]"`, and it accepts
-   `$ARGUMENTS` = the repo root (defaults to the cwd).
+1. **`disable-model-invocation: true`**, `argument-hint: "[path-to-<target>]"` (where `<target>`
+   names what the skill audits — e.g. `repo-root`, `dbt-project`, `airflow-dags`), and it accepts
+   `$ARGUMENTS` as that target directory (defaults to the cwd).
 2. **Auto-detects** which sub-checks apply by scanning the repo; records skipped ones with a reason.
 3. **Read-only** — never modifies the audited repo; never runs anything that returns warehouse
    data (e.g. `dbt show`) or reads secrets.
