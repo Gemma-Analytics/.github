@@ -1,14 +1,41 @@
-name: Claude Security Audit
+name: Claude Audit
 
 on:
   workflow_call:
     inputs:
-      audits:
+      plugin:
         description: >
-          Audit types to run (space or newline separated).
-          Currently supported: deployment-security
+          gemma-agentic-toolkit plugin whose skills/ are loaded for this audit
+          (e.g. gemma-deployment-security, gemma-dbt).
         type: string
-        default: "deployment-security"
+        default: "gemma-deployment-security"
+      orchestrator_skill:
+        description: >
+          The orchestrator skill the audit runs (must satisfy the audit-orchestrator
+          contract: read-only, auto-detects, writes a dated report with an
+          "## Executive summary" section). E.g. generate-security-report, validate-repo.
+        type: string
+        default: "generate-security-report"
+      report_slug:
+        description: >
+          Short slug for naming. Report file is <slug>-audit-report-YYYY-MM-DD.md,
+          branch audit/<slug>-YYYY-MM-DD.
+        type: string
+        default: "security"
+      pr_title_prefix:
+        description: "PR title prefix; the run date is appended."
+        type: string
+        default: "🔒 Security audit"
+      allowed_tools:
+        description: >
+          claude-code-action --allowedTools value. Default is a read-only set.
+          Audits that fan out sub-agents must add "Task" (e.g. the dbt audit).
+        type: string
+        default: 'Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Read,Glob,Grep,Write'
+      extra_instructions:
+        description: "Audit-type-specific instructions appended to the prompt (e.g. CI/non-interactive notes)."
+        type: string
+        default: ""
       model:
         description: "Bedrock model ID"
         type: string
@@ -84,17 +111,20 @@ jobs:
         id: prep
         env:
           REPORT_DIR: ${{ inputs.report_dir }}
+          PLUGIN: ${{ inputs.plugin }}
+          REPORT_SLUG: ${{ inputs.report_slug }}
         run: |
-          # Install deployment-security skills into .claude/skills/ for auto-discovery.
-          # ${CLAUDE_SKILL_DIR} in each SKILL.md will resolve to .claude/skills/<skill-name>.
+          # Install the chosen plugin's skills into .claude/skills/ for auto-discovery.
+          # ${CLAUDE_SKILL_DIR} in each SKILL.md resolves to .claude/skills/<skill-name>,
+          # and ${CLAUDE_PLUGIN_ROOT} resolves to .claude (cross-skill refs work).
           mkdir -p .claude/skills
-          cp -r .gemma-toolkit/plugins/gemma-deployment-security/skills/. .claude/skills/
+          cp -r ".gemma-toolkit/plugins/${PLUGIN}/skills/." .claude/skills/
 
           # Ensure the report output directory exists so Write can create the file there.
           mkdir -p "$REPORT_DIR"
 
           TODAY=$(date -u +%Y-%m-%d)
-          REPORT_PATH="${REPORT_DIR}/security-audit-report-${TODAY}.md"
+          REPORT_PATH="${REPORT_DIR}/${REPORT_SLUG}-audit-report-${TODAY}.md"
 
           echo "today=$TODAY" >> "$GITHUB_OUTPUT"
           echo "report_path=$REPORT_PATH" >> "$GITHUB_OUTPUT"
@@ -103,31 +133,25 @@ jobs:
         id: prompt
         env:
           REPORT_PATH: ${{ steps.prep.outputs.report_path }}
-          AUDITS: ${{ inputs.audits }}
+          REPORT_SLUG: ${{ inputs.report_slug }}
+          ORCH_SKILL: ${{ inputs.orchestrator_skill }}
+          EXTRA: ${{ inputs.extra_instructions }}
         run: |
           cat > /tmp/audit_prompt.txt << 'BASEPROMPT'
-          You are performing an automated security audit of this repository.
+          You are performing an automated REPORT_SLUG_PLACEHOLDER audit of this repository.
 
           ## Instructions
 
-          Read `.claude/skills/generate-security-report/SKILL.md` and follow its steps exactly.
+          Read `.claude/skills/ORCH_SKILL_PLACEHOLDER/SKILL.md` and follow its steps exactly.
 
-          Two path substitutions apply in CI:
-          - `${CLAUDE_SKILL_DIR}` → `.claude/skills/generate-security-report`
+          Path substitutions that apply in CI:
+          - `${CLAUDE_SKILL_DIR}` → `.claude/skills/ORCH_SKILL_PLACEHOLDER`
+          - `${CLAUDE_PLUGIN_ROOT}` → `.claude`
           - "current working directory" → the repository root
 
           Write the completed report to: REPORT_PATH_PLACEHOLDER
 
-          ## Scope
-
-          Audit type requested: AUDITS_PLACEHOLDER
-
-          For `deployment-security`: auto-detect applicable sub-audits per the detection
-          table in the SKILL.md (docker-compose, Dockerfile, .github/workflows/, .tf
-          files, Airflow indicators, .pre-commit-config.yaml).
-
-          Always skip `audit-server-config` in this CI run. Record it in the Audit
-          Scope table as "Deferred — run manually with SSH access or in guided mode."
+          EXTRA_PLACEHOLDER
 
           ## Hard rules
 
@@ -139,9 +163,19 @@ jobs:
           - Read-only audit — do not modify any source files.
           BASEPROMPT
 
-          # Substitute placeholders via env vars — never via shell interpolation in run:
+          # Single-line placeholders via env vars — never via shell interpolation in run:
+          sed -i "s|REPORT_SLUG_PLACEHOLDER|$REPORT_SLUG|g" /tmp/audit_prompt.txt
+          sed -i "s|ORCH_SKILL_PLACEHOLDER|$ORCH_SKILL|g" /tmp/audit_prompt.txt
           sed -i "s|REPORT_PATH_PLACEHOLDER|$REPORT_PATH|g" /tmp/audit_prompt.txt
-          sed -i "s|AUDITS_PLACEHOLDER|$AUDITS|g" /tmp/audit_prompt.txt
+
+          # extra_instructions may be multi-line — substitute the bare token (indentation-agnostic).
+          python3 - "$EXTRA" << 'PY'
+          import sys
+          extra = sys.argv[1].rstrip()
+          p = "/tmp/audit_prompt.txt"
+          s = open(p).read().replace("EXTRA_PLACEHOLDER", extra)
+          open(p, "w").write(s)
+          PY
 
           {
             echo 'value<<PROMPT_EOF'
@@ -160,16 +194,16 @@ jobs:
           claude_args: >-
             --model ${{ inputs.model }}
             --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Read,Glob,Grep,Write"
+            --allowedTools "${{ inputs.allowed_tools }}"
 
       - name: Move report if written to repo root
         # Safety net: if Claude writes to the CWD root despite the prompt, move it.
         env:
           REPORT_PATH: ${{ steps.prep.outputs.report_path }}
           TODAY: ${{ steps.prep.outputs.today }}
-          REPORT_DIR: ${{ inputs.report_dir }}
+          REPORT_SLUG: ${{ inputs.report_slug }}
         run: |
-          ROOT_REPORT="security-audit-report-${TODAY}.md"
+          ROOT_REPORT="${REPORT_SLUG}-audit-report-${TODAY}.md"
           if [ -f "$ROOT_REPORT" ] && [ ! -f "$REPORT_PATH" ]; then
             echo "Report found at repo root — moving to $REPORT_PATH"
             mv "$ROOT_REPORT" "$REPORT_PATH"
@@ -187,6 +221,7 @@ jobs:
         env:
           REPORT_PATH: ${{ steps.prep.outputs.report_path }}
           TODAY: ${{ steps.prep.outputs.today }}
+          REPORT_SLUG: ${{ inputs.report_slug }}
         run: |
           if [ ! -f "$REPORT_PATH" ]; then
             {
@@ -200,10 +235,11 @@ jobs:
           REPO_BASENAME=$(basename "$GITHUB_REPOSITORY")
 
           {
-            echo "Automated monthly security audit for \`${REPO_BASENAME}\` — ${TODAY}."
+            echo "Automated monthly ${REPORT_SLUG} audit for \`${REPO_BASENAME}\` — ${TODAY}."
             echo ""
-            # Extract everything between ## Executive Summary and the next ## heading.
-            awk '/^## Executive Summary/{found=1;next} found && /^## /{exit} found{print}' "$REPORT_PATH"
+            # Extract everything between the Executive summary heading and the next ## heading.
+            # Case-insensitive so it matches "## Executive Summary" and "## Executive summary".
+            awk 'tolower($0) ~ /^## executive summary/{found=1;next} found && /^## /{exit} found{print}' "$REPORT_PATH"
             echo ""
             echo "---"
             echo "Full report: \`${REPORT_PATH}\`"
@@ -216,10 +252,10 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ steps.app-token.outputs.token }}
-          branch: audit/security-${{ steps.prep.outputs.today }}
-          title: "🔒 Security audit ${{ steps.prep.outputs.today }}"
+          branch: audit/${{ inputs.report_slug }}-${{ steps.prep.outputs.today }}
+          title: "${{ inputs.pr_title_prefix }} ${{ steps.prep.outputs.today }}"
           body-path: /tmp/pr_body.md
-          commit-message: "chore(audit): security audit report ${{ steps.prep.outputs.today }}"
+          commit-message: "chore(audit): ${{ inputs.report_slug }} audit report ${{ steps.prep.outputs.today }}"
           add-paths: ${{ inputs.report_dir }}
           delete-branch: false
 
