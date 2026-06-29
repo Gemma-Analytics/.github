@@ -10,7 +10,7 @@ Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add thin
 |---|---|---|
 | [`claude-review.yml`](.github/workflows/claude-review.yml) | Automated code review when a PR is opened or marked ready for review; can also be triggered on demand by commenting `@claude review` on a PR | [docs/claude-review.md](docs/claude-review.md) |
 | [`claude.yml`](.github/workflows/claude.yml) | General-purpose `@claude` mention handler — answer questions, help with issues, respond to inline review comments | [docs/claude.md](docs/claude.md) |
-| [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled security audit — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review | [docs/claude-audit.md](docs/claude-audit.md) |
+| [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled repository audit (pluggable type — deployment-security or dbt) — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review | [docs/claude-audit.md](docs/claude-audit.md) |
 
 All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
 
@@ -88,9 +88,9 @@ jobs:
 
 > **Important:** the negation `!startsWith(..., '@claude review')` in `claude.yml` ensures that an `@claude review` comment routes to the review workflow, not the generic responder. Keep both files in sync.
 
-### 3. Scheduled security audit (`claude-audit.yml`)
+### 3. Scheduled repository audit (`claude-audit.yml`)
 
-Creates a dated Markdown report in a `reports/` directory and opens a PR for it — monthly by default, or any time via manual dispatch. Uses the `gemma-deployment-security` plugin from `gemma-agentic-toolkit` to auto-detect and run applicable audit skills (Docker Compose, Dockerfile, CI/CD workflows, Airflow config, infrastructure-as-code, pre-commit).
+Creates a dated Markdown report under `docs/audit-reports/` and opens a PR for it — monthly by default, or any time via manual dispatch. The workflow is **audit-type-agnostic**: it loads a plugin's skills and runs that plugin's orchestrator. Two types ship today — **deployment-security** (`gemma-deployment-security` / `generate-security-report`) and **dbt** (`gemma-dbt` / `validate-repo`). See [docs/claude-audit.md](docs/claude-audit.md) for the dbt caller and the orchestrator contract.
 
 ```yaml
 name: Scheduled Security Audit
@@ -108,8 +108,7 @@ permissions:
 jobs:
   audit:
     uses: Gemma-Analytics/.github/.github/workflows/claude-audit.yml@main
-    with:
-      audits: "deployment-security"
+    # Defaults run the deployment-security audit — no `with:` needed.
     secrets:
       CLAUDE_CODE_ROLE_ARN: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
       GEMMA_CLAUDE_ASSISTANT_APP_ID: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
@@ -158,12 +157,17 @@ All three secrets must be available in the repo (or inherited from the org). The
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `audits` | string | `deployment-security` | Audit types to run (space or newline separated). Currently supported: `deployment-security`. More audit types will be added here as new plugins ship (e.g. `dbt-project-review`). |
+| `plugin` | string | `gemma-deployment-security` | Toolkit plugin whose `skills/` are loaded (e.g. `gemma-dbt` for the dbt audit). |
+| `orchestrator_skill` | string | `generate-security-report` | Orchestrator skill to run (e.g. `validate-repo`). Must meet the audit-orchestrator contract — see [docs](docs/claude-audit.md). |
+| `report_slug` | string | `security` | Names the report (`<slug>-audit-report-DATE.md`) and branch (`audit/<slug>-DATE`). |
+| `pr_title_prefix` | string | `🔒 Security audit` | PR title; the run date is appended. |
+| `allowed_tools` | string | read-only set | `claude-code-action --allowedTools`. Add `Task` for audits that fan out sub-agents (e.g. the dbt audit). |
+| `extra_instructions` | string | _(empty)_ | Audit-type CI notes appended to the prompt. |
 | `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
-| `max_turns` | string | `60` | Maximum agentic turns. A full deployment-security audit runs ~30–50 turns; raised to 60 to support larger repos. |
-| `report_dir` | string | `docs/audit-reports` | Directory under the repo root where dated report files are written (`docs/audit-reports/security-audit-report-YYYY-MM-DD.md`). |
-| `toolkit_ref` | string | `main` | `gemma-agentic-toolkit` branch, tag, or SHA to check out for skills. Pin to a release tag (e.g. `gemma-deployment-security@1.1.0`) for reproducible audits. |
+| `max_turns` | string | `60` | Maximum agentic turns. |
+| `report_dir` | string | `docs/audit-reports` | Directory for the dated report (`<report_dir>/<slug>-audit-report-YYYY-MM-DD.md`). |
+| `toolkit_ref` | string | `main` | `gemma-agentic-toolkit` branch, tag, or SHA. Pin to a release tag for reproducible audits. |
 
 ---
 
