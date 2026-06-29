@@ -141,6 +141,13 @@ jobs:
             - Do NOT invent problems. Only flag real issues you can point to in the diff.
             - Do NOT suggest stylistic changes unless CLAUDE.md mandates them.
             - Prefer specific line references over generalities.
+
+          Formatting rules (apply to inline comments AND the summary)
+            - Never write a bare "#" immediately followed by a number (e.g. "#1", "#2", "#3").
+              GitHub auto-links that to an issue/PR of that number, producing misleading links.
+              When numbering findings or referring to list positions, use "1." / "2." / "3.",
+              or "1st" / "2nd" / "3rd", or phrasing like "item 2" / "the second finding".
+              Only use "#<number>" when you genuinely intend to reference that issue or PR.
           BASEPROMPT
 
           sed -i "s/PR_NUMBER_PLACEHOLDER/$PR_NUMBER/g" /tmp/review_prompt.txt
