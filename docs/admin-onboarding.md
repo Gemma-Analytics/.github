@@ -1,108 +1,61 @@
 # Client Onboarding — Internal Guide
 
-How to onboard a new external client for Claude Code PR reviews on their GitHub org.
+**Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows (PR reviews, `@claude` mentions, scheduled audits) on their GitHub org.
 
 **Time:** ~30 minutes per client (after initial setup).
 
-> **Note:** The infrastructure steps below (Steps 1–2) are executed in the [gemma-infrastructure](https://github.com/Gemma-Analytics/gemma-infrastructure) repository — all `tofu` commands and tfvars paths refer to that repo, not this one. This doc lives here so it sits next to the [client setup guide](client-setup-guide.md) you hand to the client at the end.
+## Contents
 
-## Prerequisites
+- [How Onboarding Works](#how-onboarding-works)
+- [Phase 1 — Gemma Engineer Prepares Everything](#phase-1--gemma-engineer-prepares-everything)
+  - [Prerequisites](#prerequisites)
+  - [Step 1: Provision the AWS IAM role (gemma-infrastructure)](#step-1-provision-the-aws-iam-role-gemma-infrastructure)
+  - [Step 2: Set Bedrock quotas (gemma-infrastructure)](#step-2-set-bedrock-quotas-gemma-infrastructure)
+  - [Step 3: Generate the GitHub App private key](#step-3-generate-the-github-app-private-key)
+  - [Step 4: Store the credentials in the client's 1Password vault](#step-4-store-the-credentials-in-the-clients-1password-vault)
+  - [Step 5: Hand off to the client](#step-5-hand-off-to-the-client)
+- [Phase 2 — Client Org Admin Sets Up GitHub](#phase-2--client-org-admin-sets-up-github)
+- [Phase 3 — Client Developers Enable the Workflows](#phase-3--client-developers-enable-the-workflows)
+- [Troubleshooting](#troubleshooting)
+
+## How Onboarding Works
+
+Onboarding is split into three phases with a clear owner each. Everything in Phase 1 is prepared by you (the Gemma engineer) **before** the client is involved; Phases 2 and 3 happen on the client's side, following the guide you hand them.
+
+| Phase | Who | What | Documented in |
+|-------|-----|------|---------------|
+| **1. Prepare** | Gemma engineer | AWS IAM role + Bedrock quota (PR in gemma-infrastructure), GitHub App private key, credentials in the client's 1Password vault, handoff package | This guide |
+| **2. GitHub setup** | Client's GitHub org admin | Install the GitHub App, add the three secrets to their org | [Client Setup Guide — Admin Setup](client-setup-guide.md#admin-setup-steps-12) |
+| **3. Enable workflows** | Client's developers | Add the wrapper workflow files to each repo | [Client Setup Guide — Developer Setup](client-setup-guide.md#developer-setup-step-3) |
+
+The split by repository: **AWS/Bedrock provisioning (Steps 1–2) is Terraform, done in the [gemma-infrastructure](https://github.com/Gemma-Analytics/gemma-infrastructure) repo** and documented there; the GitHub-only steps (3–5) are documented right here.
+
+---
+
+## Phase 1 — Gemma Engineer Prepares Everything
+
+### Prerequisites
 
 - The shared **Gemma Claude Assistant** GitHub App must be public. If not yet done:
   1. Go to `https://github.com/organizations/Gemma-Analytics/settings/apps`
   2. Click **Gemma Claude Assistant** > **Advanced** (sidebar)
   3. In the "Danger zone" section, click **Make public**
 
-## Step 1: Add Client to `aws/account/cicd/` Module
+### Step 1: Provision the AWS IAM role (gemma-infrastructure)
 
-Add an entry to `claude_code_clients` in **both** [`aws/account/cicd/environments/prod.tfvars`](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/environments/prod.tfvars) and [`aws/account/cicd/environments/sandbox.tfvars`](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/environments/sandbox.tfvars):
+Open a PR in the gemma-infrastructure repo adding the client to the `claude_code_clients` tfvars (this creates the `github-actions-claude-code-<slug>` IAM role with an OIDC trust policy for the client's GitHub org), apply sandbox → prod, and note the resulting **role ARN**.
 
-```hcl
-claude_code_clients = {
-  # ... existing clients ...
-  <client-slug> = {
-    github_org      = "<ClientGitHubOrg>"
-    allow_all_repos = true
-    # Or restrict to specific repos:
-    # repos = ["repo-a", "repo-b"]
-  }
-}
-```
+➡️ **Follow: [Client AWS Provisioning — Step 1: Add the client IAM role](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#step-1-add-the-client-iam-role)**
 
-The `<client-slug>` becomes part of the IAM role name (`github-actions-claude-code-<slug>`) and must be a valid IAM role name suffix (lowercase, hyphens OK, no spaces).
+> ⚠️ The client's `github_org` value must use the exact canonical casing (`gh api orgs/<org-name> --jq '.login'`) — OIDC `sub` claims are case-sensitive. Details in the linked doc.
 
-**Important: `github_org` must use the exact canonical casing.** GitHub OIDC `sub` claims are case-sensitive, but GitHub URLs are not — so `github.com/saxonia-catering` works in a browser but `saxonia-catering` will fail in the trust policy if the canonical name is `Saxonia-Catering`. Always verify with:
+### Step 2: Set Bedrock quotas (gemma-infrastructure)
 
-```bash
-gh api orgs/<org-name> --jq '.login'
-```
+In the same (or a follow-up) gemma-infrastructure PR, add the new role to the Bedrock `role_quotas` tfvars — this caps the client's spend per 3-hour/day/week window and sets the alert email. Pick a tier from the quota reference table; factor in scheduled audits if the client will enable them.
 
-### Apply
+➡️ **Follow: [Client AWS Provisioning — Step 2: Set Bedrock quotas](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#step-2-set-bedrock-quotas)**
 
-In the gemma-infrastructure repo, test in sandbox first:
-
-```bash
-cd aws/account/cicd
-tofu init -reconfigure -backend-config=backends/sandbox.hcl
-tofu plan -var-file=environments/sandbox.tfvars
-tofu apply -var-file=environments/sandbox.tfvars
-```
-
-Then production (via PR + `/apply` comment, or locally):
-
-```bash
-tofu init -reconfigure -backend-config=backends/prod.hcl
-AWS_PROFILE=infra-prod tofu plan -var-file=environments/prod.tfvars
-AWS_PROFILE=infra-prod tofu apply -var-file=environments/prod.tfvars
-```
-
-### Verify
-
-```bash
-# Get the client's role ARN
-tofu output -json claude_code_client_role_arns
-
-# Check trust policy is scoped correctly
-aws iam get-role \
-  --role-name github-actions-claude-code-<slug> \
-  --query 'Role.AssumeRolePolicyDocument' \
-  --profile infra-sandbox
-```
-
-## Step 2: Add Client Quotas to `aws/account/bedrock/` Module
-
-Add the client's role to `role_quotas` in **both** [`aws/account/bedrock/environments/prod.tfvars`](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/bedrock/environments/prod.tfvars) and [`aws/account/bedrock/environments/sandbox.tfvars`](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/bedrock/environments/sandbox.tfvars):
-
-```hcl
-role_quotas = {
-  # ... existing roles ...
-  github-actions-claude-code-<slug> = {
-    per_3h   = 3.0    # USD per 3-hour window
-    per_day  = 6.0    # USD per day
-    per_week = 10.0   # USD per week
-    email    = "contact@client-domain.com"  # quota alert recipient
-  }
-}
-```
-
-Use the sandbox values at ~10% of prod for testing.
-
-The quota enforcer Lambda and CloudWatch dashboard automatically pick up new `role_quotas` entries — no code changes needed.
-
-### Apply
-
-In the gemma-infrastructure repo:
-
-```bash
-cd aws/account/bedrock
-tofu init -reconfigure -backend-config=backends/sandbox.hcl
-tofu plan -var-file=environments/sandbox.tfvars
-tofu apply -var-file=environments/sandbox.tfvars
-```
-
-Then production (via PR + `/apply`).
-
-## Step 3: Generate a Client Private Key
+### Step 3: Generate the GitHub App private key
 
 Each client gets their own private key for the shared GitHub App. This allows independent revocation.
 
@@ -111,7 +64,16 @@ Each client gets their own private key for the shared GitHub App. This allows in
 3. Under **Private keys**, click **Generate a private key**
 4. Download the `.pem` file
 5. Note the fingerprint — label it with the client name for tracking
-6. **Store the `.pem` file as a file attachment** in the client's `<Client> - Gemma Claude App credentials (PR Review bot)` 1Password item (in the client's vault), labelled with the client name. Do not paste the key contents as a text field — file attachments preserve formatting reliably.
+
+**To revoke a client later:** Delete their private key from the app settings. Their workflows will fail to generate tokens; other clients are unaffected.
+
+### Step 4: Store the credentials in the client's 1Password vault
+
+Create an item in the **client's vault** named `<Client> - Gemma Claude App credentials (PR Review bot)` containing everything the client will need:
+
+- The **`.pem` private key as a file attachment** (from Step 3). Do not paste the key contents as a text field — file attachments preserve formatting reliably.
+- The **role ARN** (from Step 1) as a text field
+- The **App ID** (visible on the app's settings page; shared across all clients) as a text field
 
 **When sharing the key with the client:** instruct them to paste the raw file contents into the GitHub Actions secret exactly as-is, preserving all line breaks. The key must appear in the secret as multiple lines like this:
 
@@ -126,32 +88,38 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx==
 
 A single-line or reformatted key will fail with `ERR_OSSL_UNSUPPORTED` at runtime.
 
-**To revoke a client later:** Delete their private key from the app settings. Their workflows will fail to generate tokens; other clients are unaffected.
+### Step 5: Hand off to the client
 
-## Step 3b: Bedrock quota — account for scheduled audits
+Share the [Client Setup Guide](client-setup-guide.md) with your client contact, along with the four items below (via the 1Password item from Step 4, or your agreed secure channel):
 
-If the client will also run scheduled audits (see [client-setup-guide.md — Scheduled Audits](client-setup-guide.md#step-3c-scheduled-audits-optional)), factor in the monthly audit cost when choosing a quota tier. A full `deployment-security` audit on a typical Airflow/Docker repo costs roughly $0.10–$0.30 per run with Sonnet — negligible against weekly quotas, but worth noting at the Low tier.
-
-No separate IAM role, OIDC trust policy, or bedrock quota entry is needed for audits — the audit workflow uses the same `github-actions-claude-code-<slug>` role already provisioned. The audit's OIDC `sub` claim is `repo:<org>/<repo>:ref:refs/heads/main`, which is covered by the existing `allow_all_repos = true` trust policy.
-
-## Step 4: Client Setup
-
-Share the [Client Setup Guide](client-setup-guide.md) with the client, along with:
-
-- Their **role ARN** (from step 1)
+- Their **role ARN** (from Step 1)
 - The **App ID** (shared across all clients — visible on the app's settings page)
-- Their **private key** `.pem` file (from step 3)
+- Their **private key** `.pem` file (from Step 3)
 - The **install URL**: `https://github.com/apps/gemma-claude-assistant/installations/new`
 
-## Quota Reference
+Point them at the [Who Does What](client-setup-guide.md#who-does-what) section so they route the admin steps to their GitHub org owner.
 
-| Tier | per_3h | per_day | per_week | Use case |
-|------|--------|---------|----------|----------|
-| Low | $3 | $6 | $10 | Small teams, light review usage |
-| Standard | $8 | $15 | $25 | Same as Gemma internal |
-| High | $12 | $25 | $50 | Large teams, heavy usage |
+---
 
-Derive from the weekly budget: `per_day ≈ 60%`, `per_3h ≈ 30%`.
+## Phase 2 — Client Org Admin Sets Up GitHub
+
+Done by the client's GitHub Organization Owner (or IT manager), using the guide and items you handed over:
+
+1. **Install the GitHub App** on their org → [Client Setup Guide — Step 1](client-setup-guide.md#step-1-install-the-github-app)
+2. **Add the three secrets** (`CLAUDE_CODE_ROLE_ARN`, `GEMMA_CLAUDE_ASSISTANT_APP_ID`, `GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY`) at their org level → [Client Setup Guide — Step 2](client-setup-guide.md#step-2-add-secrets-to-your-github-organization)
+
+Because the client is a different GitHub org, `secrets: inherit` does not work — the secrets must exist in **their** org and be passed explicitly by every wrapper. This is spelled out in the guide's [Secrets Reference](client-setup-guide.md#secrets-reference).
+
+## Phase 3 — Client Developers Enable the Workflows
+
+Done by any client developer with repository write access, per repo:
+
+1. Add the wrapper workflow file(s) → [Client Setup Guide — Step 3](client-setup-guide.md#developer-setup-step-3) (PR reviews, optionally `@claude` mentions and scheduled audits)
+2. Open a test PR → [Client Setup Guide — Step 4](client-setup-guide.md#step-4-test-it)
+
+Once the first review lands, onboarding is complete.
+
+---
 
 ## Troubleshooting
 
@@ -160,21 +128,10 @@ Derive from the weekly budget: `per_day ≈ 60%`, `per_3h ≈ 30%`.
 - Verify the workflow uses explicit `secrets:` mapping (see the [client setup guide examples](client-setup-guide.md#secrets-reference))
 - Check that org secrets have **Repository access** set to "All repositories" or the specific repo
 
-**Client workflow fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity"**
-- Check the trust policy allows the client's GitHub org: `aws iam get-role --role-name github-actions-claude-code-<slug> --query 'Role.AssumeRolePolicyDocument'`
-- Verify the org name casing matches exactly: `gh api orgs/<org-name> --jq '.login'`
-- GitHub OIDC `sub` claims use canonical casing (e.g., `Saxonia-Catering` not `saxonia-catering`) — the trust policy must match
-- If using `repos` instead of `allow_all_repos`, verify the repo name is correct
+**Workflow fails with "Not authorized" when generating the App token**
+- The `.pem` key was likely pasted reformatted or single-line — see [Step 4](#step-4-store-the-credentials-in-the-clients-1password-vault) for the required format
+- Verify the GitHub App is installed on the repository
 
-**Quota alerts not sending to client email**
-- Verify the email address is in `role_quotas` for this role
-- Check SES: the email domain may need verification if sending from a non-sandbox SES region
-- Check Lambda logs: `aws logs tail /aws/lambda/bedrock-quota-enforcer --follow`
+**AWS-side failures** (`sts:AssumeRoleWithWebIdentity`, quota alerts, dashboard, CI/CD plan permissions) → see [Client AWS Provisioning — Troubleshooting (AWS)](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#troubleshooting-aws).
 
-**Client shows up as "unknown" in dashboard**
-- The role must be in `role_quotas` in bedrock tfvars for the dashboard to track it
-- It can take up to 15 minutes for the first metrics to appear after a deploy
-
-**CI/CD plan fails with "not authorized to perform iam:GetOpenIDConnectProvider"**
-- The `github-actions-bedrock` role needs OIDC provider permissions to plan the cicd module
-- This was bootstrapped manually in March 2026 — if the permissions are missing again (e.g., after a role recreation), apply locally with `-target=aws_iam_role_policy.iam_role_management` to unblock CI
+**Client-visible issues** (no review posted, routing, workflow not found) → see the [client setup guide's troubleshooting section](client-setup-guide.md#troubleshooting).
