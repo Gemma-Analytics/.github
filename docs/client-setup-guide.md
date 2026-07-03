@@ -25,12 +25,13 @@ This guide walks you through setting up Gemma's Claude-powered GitHub workflows 
 
 ## Who Does What
 
-Setup is split into two parts with different access requirements:
+Before this guide reaches you, your Gemma contact has already prepared everything on their side (the AWS access role, the GitHub App, and your credentials). What remains is split into two parts with different access requirements:
 
 | Part | Steps | Who needs to do it | Access required |
 |------|-------|-------------------|-----------------|
+| **Preparation** | *(already done)* | Your Gemma contact | — |
 | **Admin setup** | Steps 1 & 2 | GitHub org admin / IT manager | GitHub Organization Owner |
-| **Developer setup** | Step 3 | Any developer with repo access | Repository write access |
+| **Developer setup** | Steps 3 & 4 | Any developer with repo access | Repository write access |
 
 > **Not a GitHub org admin?** Forward the section [Admin Setup (Steps 1–2)](#admin-setup-steps-12) below to the person who manages your GitHub organization — usually an IT manager or team lead. They can complete those steps independently, and you can proceed with Step 3 once they're done.
 

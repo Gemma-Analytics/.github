@@ -20,7 +20,7 @@ All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key store
 
 Setting these workflows up in a repository **outside the Gemma-Analytics org**? Follow the **[Client Setup Guide](docs/client-setup-guide.md)** — it covers installing the GitHub App, creating the three secrets in the other org, and the wrapper files for all three workflows. The key difference from the in-org quick start below: external orgs must create the secrets themselves and pass them **explicitly** in each wrapper (`secrets: inherit` does not work across organizations).
 
-Gemma engineers provisioning a **new client** (IAM role, Bedrock quota, App private key) should start with the internal [Client Onboarding guide](docs/admin-onboarding.md).
+Gemma engineers provisioning a **new client** should start with the internal [Client Onboarding guide](docs/admin-onboarding.md) — it walks through the full sequence (AWS IAM role and Bedrock quota via gemma-infrastructure, GitHub App key, 1Password handoff) and links each step to where it's done.
 
 ---
 
