@@ -34,7 +34,7 @@ Onboarding is split into three phases, each with a clear owner. Everything in Ph
 | **2. GitHub setup** | Client's GitHub org admin | Install the GitHub App, add the three secrets to their org | [Client Setup Guide — Admin Setup](client-setup-guide.md#admin-setup-steps-12) |
 | **3. Enable workflows** | Client's developers | Add the wrapper workflow files to each repo | [Client Setup Guide — Developer Setup](client-setup-guide.md#developer-setup-step-3) |
 
-The split by repository: **AWS/Bedrock provisioning (Steps 1–2) is Terraform, done in the [gemma-infrastructure](https://github.com/Gemma-Analytics/gemma-infrastructure) repo** and documented there; the GitHub-only steps (3–5) are documented right here.
+The work is also split across two repositories: **AWS/Bedrock provisioning (Steps 1–2) is Terraform and lives in [gemma-infrastructure](https://github.com/Gemma-Analytics/gemma-infrastructure)**, where it is documented; the GitHub-only steps (3–5) are documented here.
 
 ---
 
@@ -53,23 +53,23 @@ Open a PR in the gemma-infrastructure repo adding the client to the `claude_code
 
 ➡️ **Follow: [Client AWS Provisioning — Step 1: Add the client IAM role](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#step-1-add-the-client-iam-role)**
 
-> ⚠️ The client's `github_org` value must use the exact canonical casing (`gh api orgs/<org-name> --jq '.login'`) — OIDC `sub` claims are case-sensitive. Details in the linked doc.
+> ⚠️ The client's `github_org` value must use the exact canonical casing (`gh api orgs/<org-name> --jq '.login'`), because OIDC `sub` claims are case-sensitive. Details in the linked doc.
 
 ### Step 2: Set Bedrock quotas (gemma-infrastructure)
 
-In the same (or a follow-up) gemma-infrastructure PR, add the new role to the Bedrock `role_quotas` tfvars — this caps the client's spend per 3-hour/day/week window and sets the alert email. Pick a tier from the quota reference table; factor in scheduled audits if the client will enable them.
+In the same (or a follow-up) gemma-infrastructure PR, add the new role to the Bedrock `role_quotas` tfvars. This caps the client's spend per 3-hour/day/week window and sets the alert email. Pick a tier from the quota reference table; factor in scheduled audits if the client will enable them.
 
 ➡️ **Follow: [Client AWS Provisioning — Step 2: Set Bedrock quotas](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#step-2-set-bedrock-quotas)**
 
 ### Step 3: Generate the GitHub App private key
 
-Each client gets their own private key for the shared GitHub App. This allows independent revocation.
+Each client gets their own private key for the shared GitHub App, so one client's access can be revoked without affecting the others.
 
 1. Go to `https://github.com/organizations/Gemma-Analytics/settings/apps`
 2. Click **Gemma Claude Assistant**
 3. Under **Private keys**, click **Generate a private key**
 4. Download the `.pem` file
-5. Note the fingerprint — label it with the client name for tracking
+5. Note the fingerprint and label it with the client name for tracking
 
 **To revoke a client later:** Delete their private key from the app settings. Their workflows will fail to generate tokens; other clients are unaffected.
 
@@ -77,7 +77,7 @@ Each client gets their own private key for the shared GitHub App. This allows in
 
 Create an item in the **client's vault** named `<Client> - Gemma Claude App credentials (PR Review bot)` containing everything the client will need:
 
-- The **`.pem` private key as a file attachment** (from Step 3). Do not paste the key contents as a text field — file attachments preserve formatting reliably.
+- The **`.pem` private key as a file attachment** (from Step 3). Do not paste the key contents as a text field, because file attachments preserve the formatting more reliably.
 - The **role ARN** (from Step 1) as a text field
 - The **App ID** (visible on the app's settings page; shared across all clients) as a text field
 
@@ -99,7 +99,7 @@ A single-line or reformatted key will fail with `ERR_OSSL_UNSUPPORTED` at runtim
 Share the [Client Setup Guide](client-setup-guide.md) with your client contact, along with the four items below (via the 1Password item from Step 4, or your agreed secure channel):
 
 - Their **role ARN** (from Step 1)
-- The **App ID** (shared across all clients — visible on the app's settings page)
+- The **App ID** (shared across all clients; visible on the app's settings page)
 - Their **private key** `.pem` file (from Step 3)
 - The **install URL**: `https://github.com/apps/gemma-claude-assistant/installations/new`
 
@@ -114,7 +114,7 @@ Done by the client's GitHub Organization Owner (or IT manager), using the guide 
 1. **Install the GitHub App** on their org → [Client Setup Guide — Step 1](client-setup-guide.md#step-1-install-the-github-app)
 2. **Add the three secrets** (`CLAUDE_CODE_ROLE_ARN`, `GEMMA_CLAUDE_ASSISTANT_APP_ID`, `GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY`) at their org level → [Client Setup Guide — Step 2](client-setup-guide.md#step-2-add-secrets-to-your-github-organization)
 
-Because the client is a different GitHub org, `secrets: inherit` does not work — the secrets must exist in **their** org and be passed explicitly by every wrapper. This is spelled out in the guide's [Secrets Reference](client-setup-guide.md#secrets-reference).
+Because the client is a different GitHub org, `secrets: inherit` does not work: the secrets must exist in **their** org, and every wrapper must pass them explicitly. This is spelled out in the guide's [Secrets Reference](client-setup-guide.md#secrets-reference).
 
 ## Phase 3 — Client Developers Enable the Workflows
 
@@ -130,12 +130,12 @@ Once the first review lands, onboarding is complete.
 ## Troubleshooting
 
 **Workflow fails with "Secret X is required, but not provided while calling"**
-- Client workflows must pass secrets explicitly — `secrets: inherit` does not work cross-org
+- Client workflows must pass secrets explicitly, because `secrets: inherit` does not work cross-org
 - Verify the workflow uses explicit `secrets:` mapping (see the [client setup guide examples](client-setup-guide.md#secrets-reference))
 - Check that org secrets have **Repository access** set to "All repositories" or the specific repo
 
 **Workflow fails with "Not authorized" when generating the App token**
-- The `.pem` key was likely pasted reformatted or single-line — see [Step 4](#step-4-store-the-credentials-in-the-clients-1password-vault) for the required format
+- The `.pem` key was likely pasted reformatted or single-line; [Step 4](#step-4-store-the-credentials-in-the-clients-1password-vault) shows the required format
 - Verify the GitHub App is installed on the repository
 
 **AWS-side failures** (`sts:AssumeRoleWithWebIdentity`, quota alerts, dashboard, CI/CD plan permissions) → see [Client AWS Provisioning — Troubleshooting (AWS)](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#troubleshooting-aws).
