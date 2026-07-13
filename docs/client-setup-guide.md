@@ -2,7 +2,7 @@
 
 This guide walks you through setting up Gemma's Claude-powered GitHub workflows on your repositories. Once configured, Claude can automatically review every pull request, answer `@claude` mentions on issues and PRs, and run scheduled repository audits.
 
-> **Working inside the Gemma-Analytics org?** You don't need this guide — the secrets are already configured at the org level and `secrets: inherit` works. Use the wrapper snippets in the [README quick start](../README.md#quick-start--adding-workflows-to-a-new-repo) instead. This guide is for **every other GitHub organization**, where secrets must be set up explicitly (see the [Secrets Reference](#secrets-reference) at the bottom).
+> **Working inside the Gemma-Analytics org?** You don't need this guide: the secrets are already configured at the org level and `secrets: inherit` works. Use the wrapper snippets in the [README quick start](../README.md#quick-start--adding-workflows-to-a-new-repo) instead. This guide is for **every other GitHub organization**, where secrets must be set up explicitly (see the [Secrets Reference](#secrets-reference) at the bottom).
 
 ## Contents
 
@@ -33,7 +33,7 @@ Before this guide reaches you, your Gemma contact has already prepared everythin
 | **Admin setup** | Steps 1 & 2 | GitHub org admin / IT manager | GitHub Organization Owner |
 | **Developer setup** | Steps 3 & 4 | Any developer with repo access | Repository write access |
 
-> **Not a GitHub org admin?** Forward the section [Admin Setup (Steps 1–2)](#admin-setup-steps-12) below to the person who manages your GitHub organization — usually an IT manager or team lead. They can complete those steps independently, and you can proceed with Step 3 once they're done.
+> **Not a GitHub org admin?** Forward the section [Admin Setup (Steps 1–2)](#admin-setup-steps-12) below to the person who manages your GitHub organization, usually an IT manager or team lead. They can complete those steps independently, and you can proceed with Step 3 once they're done.
 
 ---
 
@@ -45,13 +45,13 @@ Your Gemma contact will provide these three items:
 2. **App ID** — a number (e.g., `12345`)
 3. **Private key file** — a `.pem` file (keep this safe, it's like a password)
 
-*(For Gemma engineers: these come out of the client onboarding runbook — see [admin-onboarding.md](admin-onboarding.md).)*
+*(For Gemma engineers: these come out of the client onboarding runbook, [admin-onboarding.md](admin-onboarding.md).)*
 
 ---
 
 ## Admin Setup (Steps 1–2)
 
-> **This section requires GitHub Organization Owner access.** If you are not an org owner, ask your IT manager or GitHub admin to complete Steps 1 and 2. You can forward just this section to them — they don't need the rest of the guide.
+> **This section requires GitHub Organization Owner access.** If you are not an org owner, ask your IT manager or GitHub admin to complete Steps 1 and 2. You can forward just this section to them; they don't need the rest of the guide.
 >
 > Once done, they should confirm which repositories have access so you can proceed to Step 3.
 
@@ -62,11 +62,11 @@ Your Gemma contact will provide these three items:
 3. Choose which repositories should have access (you can select all or pick specific ones)
 4. Click **Install**
 
-That's it — the app is now installed on your org.
+That's it. The app is now installed on your org.
 
 ## Step 2: Add Secrets to Your GitHub Organization
 
-> **Requires GitHub Organization Owner access** — the same person who completed Step 1.
+> **Requires GitHub Organization Owner access** (the same person who completed Step 1).
 
 Secrets are like passwords that GitHub Actions uses behind the scenes. You add them once at the organization level and every repository in your org can use them.
 
@@ -92,7 +92,7 @@ See the [Secrets Reference](#secrets-reference) at the bottom of this guide for 
 
 ## Developer Setup (Step 3)
 
-> **Requires repository write access.** Steps 1 and 2 must be complete before this step — check with your admin that the GitHub App is installed and the three secrets have been added.
+> **Requires repository write access.** Steps 1 and 2 must be complete before this step. Check with your admin that the GitHub App is installed and the three secrets have been added.
 
 Each capability is a small "wrapper" workflow file you add to a repository. The wrapper calls the shared workflow hosted in `Gemma-Analytics/.github` and passes the three secrets along. Start with PR reviews (Step 3a); the mention responder and scheduled audits are optional add-ons that reuse the exact same secrets.
 
@@ -104,7 +104,7 @@ Claude reviews every new pull request and posts inline comments plus a summary. 
 
 ### Option A — Let Claude Code do it (recommended)
 
-If you have [Claude Code](https://claude.ai/code) available, it can inspect your repository, detect your tech stack, and write the workflow file for you — including tailoring the review instructions to your codebase conventions.
+If you have [Claude Code](https://claude.ai/code) available, it can inspect your repository, detect your tech stack, and write the workflow file for you, with the review instructions tailored to your codebase conventions.
 
 **Before you start:** Make sure Steps 1 and 2 above are complete, and that you have Claude Code installed and are running it inside your repository folder.
 
@@ -165,7 +165,7 @@ jobs:
 
 Commit and push this file to the `main` branch.
 
-> **Note:** The path `.github/.github/workflows/` is not a typo — it's how GitHub resolves reusable workflows from an organization's `.github` repository.
+> **Note:** The path `.github/.github/workflows/` is not a typo; it's how GitHub resolves reusable workflows from an organization's `.github` repository.
 
 ### Adding Review Instructions for Your Stack
 
@@ -250,7 +250,7 @@ You can mix and match these instructions or write your own. The `additional_inst
 
 ## Step 3b: `@claude` Mention Responder (Optional)
 
-Beyond reviews, Claude can respond to `@claude` mentions anywhere in your repos — answer questions on issues, help in PR discussions, and reply to inline review comments.
+Beyond reviews, Claude can respond to `@claude` mentions anywhere in your repos: it can answer questions on issues, help in PR discussions, and reply to inline review comments.
 
 Create `.github/workflows/claude.yml`:
 
@@ -288,11 +288,11 @@ jobs:
       GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
 ```
 
-> **Why the `!startsWith(..., '@claude review')` conditions?** They route `@claude review` comments to the review workflow (Step 3a) instead of the generic responder. If you use both workflows, keep the two `if:` conditions in sync — see [claude.md](claude.md) for the full routing rules. Note that the trigger is case-sensitive: `@claude review` triggers a review, `@Claude review` does not.
+> **Why the `!startsWith(..., '@claude review')` conditions?** They route `@claude review` comments to the review workflow (Step 3a) instead of the generic responder. If you use both workflows, keep the two `if:` conditions in sync (see [claude.md](claude.md) for the full routing rules). Note that the trigger is case-sensitive: `@claude review` triggers a review, `@Claude review` does not.
 
 ## Step 3c: Scheduled Audits (Optional)
 
-Once the secrets are in place (Steps 1–2), you can also enable automated monthly audits — no additional secrets or access control changes needed. Each audit run checks out your repository read-only, writes a dated Markdown report under `docs/audit-reports/`, and opens a PR so your team can review and act on the findings. Running the same audit twice on one date updates the existing branch and PR rather than creating a duplicate.
+Once the secrets are in place (Steps 1–2), you can also enable automated monthly audits; no additional secrets or access control changes are needed. Each audit run checks out your repository read-only, writes a dated Markdown report under `docs/audit-reports/`, and opens a PR so your team can review and act on the findings. Running the same audit twice on one date updates the existing branch and PR rather than creating a duplicate.
 
 Two audit types are available today (see [claude-audit.md](claude-audit.md) for details and how to add more):
 
@@ -367,13 +367,13 @@ Commit either file on a branch and merge to `main`. The monthly cron fires autom
 
 > **Tips:**
 > - If you enable both audits in one repo, offset the cron schedules (as shown above) so they don't compete for the usage budget in the same 3-hour window.
-> - For unattended scheduled runs, consider pinning to a commit SHA instead of `@main` for reproducibility — see [Version Pinning](#version-pinning).
+> - For unattended scheduled runs, consider pinning to a commit SHA instead of `@main` for reproducibility (see [Version Pinning](#version-pinning)).
 
 ---
 
 ### Agent instructions
 
-> *This section is written for Claude Code. If you're a human, you can skip it — the prompt in Option A above handles everything.*
+> *This section is written for Claude Code. If you're a human, you can skip it; the prompt in Option A above handles everything.*
 
 You are setting up Claude Code PR reviews for the current repository. Follow these steps precisely.
 
@@ -399,7 +399,7 @@ If a `CLAUDE.md` file exists at the repo root, read it and extract:
 - Forbidden patterns ("never use BashOperator", "always use `uv run`")
 - Any other concrete, diff-verifiable rules
 
-These become the bullet points in `additional_instructions`. Keep them specific — "every model must have a `not_null` test on its primary_key column" is good; "write high-quality models" is not.
+These become the bullet points in `additional_instructions`. Keep them specific: "every model must have a `not_null` test on its primary_key column" is good; "write high-quality models" is not.
 
 **3. Write the workflow file**
 
@@ -444,16 +444,16 @@ jobs:
 - **Never change the `on:` triggers or the `if:` condition.** Both PR events and comment triggers are required for the full feature set (automatic review on open + on-demand re-review via `@claude review`).
 - **Do not assume or hardcode the role ARN, App ID, or private key.** Those are already set as GitHub Actions secrets by the repository owner.
 - If the repo has no `CLAUDE.md` and no clear tech stack, omit the `with:` block entirely (bare minimum workflow).
-- If the user also asks for the `@claude` mention responder or a scheduled audit, use the exact templates from [Step 3b](#step-3b-claude-mention-responder-optional) and [Step 3c](#step-3c-scheduled-audits-optional) of this guide — same critical rules apply (explicit `secrets:` block, unmodified `permissions:` and `if:` conditions). The mention responder's `if:` must keep the `!startsWith(..., '@claude review')` negations so review requests route to the review workflow.
+- If the user also asks for the `@claude` mention responder or a scheduled audit, use the exact templates from [Step 3b](#step-3b-claude-mention-responder-optional) and [Step 3c](#step-3c-scheduled-audits-optional) of this guide. The same critical rules apply (explicit `secrets:` block, unmodified `permissions:` and `if:` conditions). The mention responder's `if:` must keep the `!startsWith(..., '@claude review')` negations so review requests route to the review workflow.
 
 **4. Tell the user what to do next**
 
 After writing the file, tell the user:
 
 1. Commit the file on a feature branch and push it
-2. Merge to `main` (or whichever the default branch is) — the workflow must be on the default branch to trigger on PRs
+2. Merge to `main` (or whichever the default branch is); the workflow must be on the default branch to trigger on PRs
 3. Open a small test PR (any trivial change is fine)
-4. Check the **Actions** tab — a `Claude Code Review` run should appear within ~1 minute
+4. Check the **Actions** tab: a `Claude Code Review` run should appear within ~1 minute
 5. Once complete, Claude's review comment will appear on the PR
 
 If the Actions run fails, the most common causes are:
@@ -481,7 +481,7 @@ When you open or update a pull request, GitHub Actions runs the review workflow:
 3. Claude reviews your code changes and posts comments on the PR
 4. The temporary access expires after one hour
 
-Your code is processed by Claude for the review and is not stored afterward. The `@claude` mention responder and scheduled audits work the same way — same authentication, same short-lived access.
+Your code is processed by Claude for the review and is not stored afterward. The `@claude` mention responder and scheduled audits work the same way, with the same authentication and the same short-lived access.
 
 ## Usage Limits
 
@@ -491,7 +491,7 @@ You'll receive an email notification at the address your Gemma contact has on fi
 
 ## Version Pinning
 
-The snippets above reference the shared workflows with `@main`, which means you automatically get improvements as they're released. If you prefer a stable pin — recommended for unattended scheduled audits — reference a specific commit SHA instead:
+The snippets above reference the shared workflows with `@main`, which means you automatically get improvements as they're released. If you prefer a stable pin (recommended for unattended scheduled audits), reference a specific commit SHA instead:
 
 ```yaml
 uses: Gemma-Analytics/.github/.github/workflows/claude-audit.yml@<commit-sha>
@@ -511,7 +511,7 @@ You can find the current SHA on the [Gemma-Analytics/.github commits page](https
 - Make sure the `.pem` private key was copied in full (including the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines)
 
 **Workflow fails with "Secret X is required, but not provided"**
-- The workflow must pass secrets explicitly — `secrets: inherit` does not work across organizations
+- The workflow must pass secrets explicitly, because `secrets: inherit` does not work across organizations
 - Verify the workflow file contains the explicit `secrets:` block shown in the templates above
 - Check that org secrets have **Repository access** set to "All repositories" or the specific repo
 
@@ -520,7 +520,7 @@ You can find the current SHA on the [Gemma-Analytics/.github commits page](https
 
 **`@claude` mention gets a review instead of an answer (or vice versa)**
 - Routing is based on the comment prefix: comments starting with `@claude review` go to the review workflow; all other `@claude` mentions go to the responder
-- The trigger is case-sensitive — `@Claude review` will not start a review
+- The trigger is case-sensitive: `@Claude review` will not start a review
 - Check that the `if:` conditions in both wrapper files match the templates exactly
 
 **Need help?**
@@ -536,8 +536,8 @@ This is the single most important difference when setting up these workflows out
 
 | | Repos in `Gemma-Analytics` | Repos in **any other org** |
 |---|---|---|
-| Secret values | Already configured at the org level — nothing to set up | Must be **created in your org** (Step 2 above), at the org level or per repo |
-| Wrapper `secrets:` | `secrets: inherit` works | Must **pass all three explicitly by name** — `secrets: inherit` silently passes nothing across org boundaries |
+| Secret values | Already configured at the org level, nothing to set up | Must be **created in your org** (Step 2 above), at the org level or per repo |
+| Wrapper `secrets:` | `secrets: inherit` works | Must **pass all three explicitly by name**; `secrets: inherit` silently passes nothing across org boundaries |
 
 Every wrapper in this guide therefore ends with this exact block:
 
@@ -558,11 +558,11 @@ If you omit it (or use `secrets: inherit`), the run fails with *"Secret X is req
 | `GEMMA_CLAUDE_ASSISTANT_APP_ID` | GitHub App ID; comments and PRs appear under the **Gemma Claude Assistant** bot identity | Provided by your Gemma contact (same for all clients) |
 | `GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY` | GitHub App private key (`.pem` file contents) | Provided by your Gemma contact, generated per client for independent revocation |
 
-All three workflows (reviews, mentions, audits) share these same three secrets — enabling an additional workflow never requires new secrets or AWS changes.
+All three workflows (reviews, mentions, audits) share the same three secrets, so enabling an additional workflow never requires new secrets or AWS changes.
 
 ### Common pitfalls
 
 - **Paste the `.pem` file whole.** The private key secret must contain the complete multi-line file, including the `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines, with all line breaks preserved. A key collapsed onto a single line fails at runtime with `ERR_OSSL_UNSUPPORTED`.
-- **Grant repository access.** Org-level secrets have a **Repository access** setting — if a repo isn't covered ("All repositories" or explicitly selected), the workflow behaves as if the secret doesn't exist.
-- **Org secrets need a GitHub plan that supports them** for private repos (GitHub Free orgs only expose org secrets to public repos). If org-level secrets aren't available, fall back to per-repo secrets — same names, set in each repository's **Settings** > **Secrets and variables** > **Actions**.
-- **Never commit these values.** The role ARN, App ID, and key belong only in GitHub Actions secrets — never in the workflow file, the repo, or chat logs.
+- **Grant repository access.** Org-level secrets have a **Repository access** setting. If a repo isn't covered ("All repositories" or explicitly selected), the workflow behaves as if the secret doesn't exist.
+- **Org secrets need a GitHub plan that supports them** for private repos (GitHub Free orgs only expose org secrets to public repos). If org-level secrets aren't available, fall back to per-repo secrets: same names, set in each repository's **Settings** > **Secrets and variables** > **Actions**.
+- **Never commit these values.** The role ARN, App ID, and key belong only in GitHub Actions secrets, never in the workflow file, the repo, or chat logs.
