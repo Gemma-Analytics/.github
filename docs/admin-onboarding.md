@@ -2,11 +2,11 @@
 
 **Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows on their GitHub org.
 
-Completing this onboarding is what unlocks the full set of reusable workflows from this repository for the client:
+Once onboarding is complete, the client can use all three reusable workflows from this repository:
 
-- [`claude-review.yml`](claude-review.md) — automated code review on every new PR, plus on-demand re-reviews via `@claude review` comments
-- [`claude.yml`](claude.md) — general-purpose `@claude` mention responder for answering questions, helping with issues, and responding to inline review comments
-- [`claude-audit.yml`](claude-audit.md) — scheduled monthly repository audits (deployment-security or dbt), delivered as a PR with a dated Markdown report
+- [`claude-review.yml`](claude-review.md) — reviews every new PR automatically; comment `@claude review` to re-run it on demand
+- [`claude.yml`](claude.md) — responds to `@claude` mentions in issues, PR comments, and inline review comments
+- [`claude-audit.yml`](claude-audit.md) — runs a monthly repository audit (deployment-security or dbt) and opens a PR with a dated report
 
 **Time:** ~30 minutes per client (after initial setup).
 
@@ -26,7 +26,7 @@ Completing this onboarding is what unlocks the full set of reusable workflows fr
 
 ## How Onboarding Works
 
-Onboarding is split into three phases with a clear owner each. Everything in Phase 1 is prepared by you (the Gemma engineer) **before** the client is involved; Phases 2 and 3 happen on the client's side, following the guide you hand them.
+Onboarding is split into three phases, each with a clear owner. Everything in Phase 1 is prepared by you (the Gemma engineer) **before** the client is involved; Phases 2 and 3 happen on the client's side, following the guide you hand them.
 
 | Phase | Who | What | Documented in |
 |-------|-----|------|---------------|
