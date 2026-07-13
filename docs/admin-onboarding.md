@@ -1,6 +1,12 @@
 # Client Onboarding — Internal Guide
 
-**Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows (PR reviews, `@claude` mentions, scheduled audits) on their GitHub org.
+**Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows on their GitHub org.
+
+Completing this onboarding is what unlocks the full set of reusable workflows from this repository for the client:
+
+- [`claude-review.yml`](claude-review.md) — automated code review on every new PR, plus on-demand re-reviews via `@claude review` comments
+- [`claude.yml`](claude.md) — general-purpose `@claude` mention responder for answering questions, helping with issues, and responding to inline review comments
+- [`claude-audit.yml`](claude-audit.md) — scheduled monthly repository audits (deployment-security or dbt), delivered as a PR with a dated Markdown report
 
 **Time:** ~30 minutes per client (after initial setup).
 
