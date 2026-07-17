@@ -36,6 +36,16 @@ Onboarding is split into three phases, each with a clear owner. Everything in Ph
 
 The work is also split across two repositories: **AWS/Bedrock provisioning (Steps 1–2) is Terraform and lives in [gemma-infrastructure](https://github.com/Gemma-Analytics/gemma-infrastructure)**, where it is documented; the GitHub-only steps (3–5) are documented here.
 
+### Which credential option did the client choose?
+
+Before starting Phase 1, confirm how the client wants to power Claude (see [Choosing Your Claude Credentials](client-setup-guide.md#choosing-your-claude-credentials) in the client guide):
+
+| Client uses… | Steps 1–2 (gemma-infrastructure) | Steps 3–5 (GitHub App + handoff) |
+|---|---|---|
+| **Gemma's Bedrock** (default) | Required | Required |
+| **Their own Bedrock** | **Skip**: their AWS admin provides the role ARN; no gemma-infrastructure PR | Required |
+| **Their own Anthropic API key** | **Skip**: the shared workflows are Bedrock-only today, so coordinate the workflow change before promising this | Required |
+
 ---
 
 ## Phase 1 — Gemma Engineer Prepares Everything
@@ -49,6 +59,8 @@ The work is also split across two repositories: **AWS/Bedrock provisioning (Step
 
 ### Step 1: Provision the AWS IAM role (gemma-infrastructure)
 
+> **Gemma's Bedrock only.** Skip this step (and Step 2) if the client brings their own credentials; see [the table above](#which-credential-option-did-the-client-choose).
+
 Open a PR in the gemma-infrastructure repo adding the client to the `claude_code_clients` tfvars (this creates the `github-actions-claude-code-<slug>` IAM role with an OIDC trust policy for the client's GitHub org), apply sandbox → prod, and note the resulting **role ARN**.
 
 ➡️ **Follow: [Client AWS Provisioning — Step 1: Add the client IAM role](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#step-1-add-the-client-iam-role)**
@@ -56,6 +68,8 @@ Open a PR in the gemma-infrastructure repo adding the client to the `claude_code
 > ⚠️ The client's `github_org` value must use the exact canonical casing (`gh api orgs/<org-name> --jq '.login'`), because OIDC `sub` claims are case-sensitive. Details in the linked doc.
 
 ### Step 2: Set Bedrock quotas (gemma-infrastructure)
+
+> **Gemma's Bedrock only.** Skip if the client brings their own credentials.
 
 In the same (or a follow-up) gemma-infrastructure PR, add the new role to the Bedrock `role_quotas` tfvars. This caps the client's spend per 3-hour/day/week window and sets the alert email. Pick a tier from the quota reference table; factor in scheduled audits if the client will enable them.
 
@@ -78,7 +92,7 @@ Each client gets their own private key for the shared GitHub App, so one client'
 Create an item in the **client's vault** named `<Client> - Gemma Claude App credentials (PR Review bot)` containing everything the client will need:
 
 - The **`.pem` private key as a file attachment** (from Step 3). Do not paste the key contents as a text field, because file attachments preserve the formatting more reliably.
-- The **role ARN** (from Step 1) as a text field
+- The **role ARN** (from Step 1) as a text field (omit for clients on their own credentials)
 - The **App ID** (visible on the app's settings page; shared across all clients) as a text field
 
 **When sharing the key with the client:** instruct them to paste the raw file contents into the GitHub Actions secret exactly as-is, preserving all line breaks. The key must appear in the secret as multiple lines like this:
@@ -98,7 +112,7 @@ A single-line or reformatted key will fail with `ERR_OSSL_UNSUPPORTED` at runtim
 
 Share the [Client Setup Guide](client-setup-guide.md) with your client contact, along with the four items below (via the 1Password item from Step 4, or your agreed secure channel):
 
-- Their **role ARN** (from Step 1)
+- Their **role ARN** from Step 1 (omit for clients on their own credentials; their AWS admin provides it instead)
 - The **App ID** (shared across all clients; visible on the app's settings page)
 - Their **private key** `.pem` file (from Step 3)
 - The **install URL**: `https://github.com/apps/gemma-claude-assistant/installations/new`
