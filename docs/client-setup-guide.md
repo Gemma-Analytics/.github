@@ -1,5 +1,7 @@
 # Setting Up Claude Code Workflows in Your Organization
 
+> **These workflows run on GitHub only.** They are built on GitHub Actions and a GitHub App, so they work in any GitHub organization, but not on GitLab, Bitbucket, Azure DevOps, or other platforms.
+
 This guide walks you through setting up Gemma's Claude-powered GitHub workflows on your repositories. Once configured, Claude can automatically review every pull request, answer `@claude` mentions on issues and PRs, and run scheduled repository audits.
 
 > **Working inside the Gemma-Analytics org?** You don't need this guide: the secrets are already configured at the org level and `secrets: inherit` works. Use the wrapper snippets in the [README quick start](../README.md#quick-start--adding-workflows-to-a-new-repo) instead. This guide is for **every other GitHub organization**, where secrets must be set up explicitly (see the [Secrets Reference](#secrets-reference) at the bottom).
@@ -7,6 +9,7 @@ This guide walks you through setting up Gemma's Claude-powered GitHub workflows 
 ## Contents
 
 - [Who Does What](#who-does-what)
+- [Choosing Your Claude Credentials](#choosing-your-claude-credentials)
 - [What You'll Need](#what-youll-need)
 - [Admin Setup (Steps 1–2)](#admin-setup-steps-12)
   - [Step 1: Install the GitHub App](#step-1-install-the-github-app)
@@ -37,9 +40,32 @@ Before this guide reaches you, your Gemma contact has already prepared everythin
 
 ---
 
+## Choosing Your Claude Credentials
+
+The workflows need access to a Claude model. There are three ways to provide it; most clients use the first.
+
+| Option | Where Claude runs | What Gemma provides | What your side provides |
+|---|---|---|---|
+| **Gemma's Bedrock** (default) | Gemma's AWS account | Role ARN, App ID, private key | Nothing extra |
+| **Your own AWS Bedrock** | Your AWS account | App ID, private key | A role ARN from your AWS admin |
+| **Your own Anthropic API key** | Anthropic's API | App ID, private key | An Anthropic API key |
+
+**Gemma's Bedrock (default).** Gemma provisions and manages the AWS side, including usage budgets and alerting (see [Usage Limits](#usage-limits)). The rest of this guide assumes this option; if it's yours, skip the two variants below and read on.
+
+**Your own AWS Bedrock.** If your company already has AWS Bedrock access and prefers that Claude runs in your own AWS account, ask your AWS administrator for the credentials. What you need is:
+
+- an **IAM role ARN** for a role that GitHub Actions in your GitHub organization can assume via OIDC, with access to Claude models on Bedrock
+- the **AWS region** where that Bedrock access lives (only relevant if it isn't `eu-central-1`)
+
+Then follow this guide as written, with two substitutions: in [Step 2](#step-2-add-secrets-to-your-github-organization), set `CLAUDE_CODE_ROLE_ARN` to your own role's ARN instead of one from Gemma, and if your region differs from the default, add `aws_region` under the `with:` block of each wrapper in Step 3. Everything else (the GitHub App, the secret names, the wrapper files) is identical. Note that the [Usage Limits](#usage-limits) section does not apply to you; cost monitoring happens in your AWS account.
+
+**Your own Anthropic API key.** Supported on request. The shared workflows currently authenticate via Bedrock, so this option needs a small adjustment on Gemma's side first. If you'd rather use an Anthropic API key directly, tell your Gemma contact and they will enable it and provide the adjusted setup snippets.
+
+---
+
 ## What You'll Need
 
-Your Gemma contact will provide these three items:
+Your Gemma contact will provide these three items (with your own Bedrock, the Role ARN comes from your AWS admin instead; see [Choosing Your Claude Credentials](#choosing-your-claude-credentials)):
 
 1. **Role ARN** — a string that looks like `arn:aws:iam::123456789012:role/github-actions-claude-code-yourcompany`
 2. **App ID** — a number (e.g., `12345`)
@@ -78,7 +104,7 @@ Secrets are like passwords that GitHub Actions uses behind the scenes. You add t
 
 | Name | Value |
 |------|-------|
-| `CLAUDE_CODE_ROLE_ARN` | Paste the Role ARN your Gemma contact gave you |
+| `CLAUDE_CODE_ROLE_ARN` | Paste the Role ARN your Gemma contact gave you (or the one from your AWS admin, if you use [your own Bedrock](#choosing-your-claude-credentials)) |
 | `GEMMA_CLAUDE_ASSISTANT_APP_ID` | Paste the App ID number |
 | `GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY` | Open the `.pem` file in a text editor, copy the entire contents, and paste it here |
 
@@ -483,7 +509,11 @@ When you open or update a pull request, GitHub Actions runs the review workflow:
 
 Your code is processed by Claude for the review and is not stored afterward. The `@claude` mention responder and scheduled audits work the same way, with the same authentication and the same short-lived access.
 
+If you use [your own Bedrock](#choosing-your-claude-credentials), the flow is identical; the temporary AWS access points at your own account instead of Gemma's.
+
 ## Usage Limits
+
+> This section applies when you use **Gemma's Bedrock** (the default). With your own Bedrock or Anthropic API key, usage and cost monitoring happen in your own account instead.
 
 Your organization has a usage budget to keep costs predictable. If the budget is reached, reviews will pause temporarily and resume automatically when the usage window resets (every 3 hours, daily, or weekly depending on which limit was hit).
 
@@ -554,7 +584,7 @@ If you omit it (or use `secrets: inherit`), the run fails with *"Secret X is req
 
 | Secret | What it is | Where it comes from |
 |---|---|---|
-| `CLAUDE_CODE_ROLE_ARN` | AWS IAM role ARN; lets GitHub Actions authenticate to AWS Bedrock via OIDC (no long-lived AWS keys) | Provided by your Gemma contact, provisioned per client org |
+| `CLAUDE_CODE_ROLE_ARN` | AWS IAM role ARN; lets GitHub Actions authenticate to AWS Bedrock via OIDC (no long-lived AWS keys) | Provided by your Gemma contact, provisioned per client org (or by your own AWS admin if you use [your own Bedrock](#choosing-your-claude-credentials)) |
 | `GEMMA_CLAUDE_ASSISTANT_APP_ID` | GitHub App ID; comments and PRs appear under the **Gemma Claude Assistant** bot identity | Provided by your Gemma contact (same for all clients) |
 | `GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY` | GitHub App private key (`.pem` file contents) | Provided by your Gemma contact, generated per client for independent revocation |
 

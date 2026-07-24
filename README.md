@@ -12,7 +12,9 @@ Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add thin
 | [`claude.yml`](.github/workflows/claude.yml) | General-purpose `@claude` mention handler — answer questions, help with issues, respond to inline review comments | [docs/claude.md](docs/claude.md) |
 | [`claude-audit.yml`](.github/workflows/claude-audit.yml) | Scheduled repository audit (pluggable type — deployment-security or dbt) — runs monthly (or on demand), writes a dated Markdown report, and opens a PR for review | [docs/claude-audit.md](docs/claude-audit.md) |
 
-All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
+All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored), by default through Gemma's AWS account; clients can bring their own Bedrock role instead (see [Choosing Your Claude Credentials](docs/client-setup-guide.md#choosing-your-claude-credentials)). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
+
+> **Note:** these workflows run on GitHub only. They depend on GitHub Actions and a GitHub App, so they cannot be used on GitLab, Bitbucket, or other platforms.
 
 ---
 
