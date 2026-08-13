@@ -142,7 +142,7 @@ jobs:
 | `pr_title_prefix` | `🔒 Security audit` | PR title; the run date is appended. |
 | `allowed_tools` | read-only set¹ | `claude-code-action --allowedTools`. Add `Task` for audits that fan out sub-agents. |
 | `extra_instructions` | _(empty)_ | Appended to the prompt — audit-type CI notes (e.g. defer a sub-check, suppress an interactive step). |
-| `model` | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. Sonnet is the default for both audits. |
+| `model` | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. Sonnet is the default for both audits. |
 | `aws_region` | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `max_turns` | `60` | Maximum agentic turns. |
 | `report_dir` | `docs/audit-reports` | Directory for the dated report. |

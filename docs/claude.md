@@ -95,7 +95,7 @@ The `!startsWith(..., '@claude review')` guard ensures `@claude review` always r
 
 | Input | Default | Description |
 |---|---|---|
-| `model` | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
+| `model` | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. |
 | `aws_region` | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `prompt` | _(empty)_ | When empty, the action reads the trigger event (comment/issue body) and handles `@claude` mentions natively. Pass an explicit prompt only for special routing scenarios — rarely needed in practice. |
 | `max_turns` | _(action default)_ | When blank, the action uses its built-in default. Set a number to cap cost on repos with expensive interactions. |
