@@ -23,7 +23,8 @@ Client repo                       Gemma-Analytics/.github              AWS / Git
                                    │    (CLAUDE_CODE_ROLE_ARN)                       │ (eu-central-1)
                                    │                                                 │
                                    │ 4. React 👀 to trigger comment                  │
-                                   │    (if comment event)                           │
+                                   │    (only if the @claude mention is outside      │
+                                   │    blockquotes and inline code)                 │
                                    │                                                 │
                                    │ 5. claude-code-action@v1 ──────────────────────▶│ Claude
                                    │    ├─ reads trigger context natively            │ (Bedrock)
@@ -49,6 +50,12 @@ PR review thread contains "@claude" ──────────────�
 ```
 
 > `@claude review` routing is **case-sensitive**. `@Claude review` (capital C) routes to the generic handler.
+
+### Quoted mentions are ignored
+
+A `@claude` mention inside a markdown blockquote (`> ...`) or inline code span (`` `@claude review` ``) does not trigger Claude. This happens, for example, when someone replies to a review using GitHub's "Quote reply", which quotes the footer "You can request a new review by commenting `@claude review`."
+
+Because client wrappers gate on `contains(comment.body, '@claude')`, such a comment still starts the workflow run — but the run strips blockquotes and code spans before acknowledging, so no 👀 reaction is added, and `claude-code-action` performs the same check and exits without running Claude. The only cost is a short (~15 second) runner start.
 
 ---
 
