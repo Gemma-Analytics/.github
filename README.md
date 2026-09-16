@@ -151,7 +151,7 @@ All three secrets must be available in the repo (or inherited from the org). The
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. Change to use a different Claude model (e.g. `eu.anthropic.claude-opus-4-7` for harder reviews). |
+| `model` | string | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. Change to use a different Claude model (e.g. `eu.anthropic.claude-opus-4-7` for harder reviews). |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. All Gemma infra is in `eu-central-1`; only change if a repo's workload is in another region. |
 | `additional_instructions` | string | _(empty)_ | Repo-specific review rules appended to the base prompt. Use one bullet per line. Claude checks these on top of the standard review criteria. |
 | `max_turns` | string | `50` | Maximum agentic turns. Caps cost on large diffs; raised to 50 to support exhaustive category sweeps. |
@@ -160,7 +160,7 @@ All three secrets must be available in the repo (or inherited from the org). The
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
+| `model` | string | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `prompt` | string | _(empty)_ | When empty, the action reads the triggering comment/issue body and handles `@claude` mentions natively. Pass an explicit prompt only for special routing (rarely needed). |
 | `max_turns` | string | _(empty — action default)_ | When blank, the action uses its built-in default. |
@@ -175,7 +175,7 @@ All three secrets must be available in the repo (or inherited from the org). The
 | `pr_title_prefix` | string | `🔒 Security audit` | PR title; the run date is appended. |
 | `allowed_tools` | string | read-only set | `claude-code-action --allowedTools`. Add `Task` for audits that fan out sub-agents (e.g. the dbt audit). |
 | `extra_instructions` | string | _(empty)_ | Audit-type CI notes appended to the prompt. |
-| `model` | string | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. |
+| `model` | string | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. |
 | `aws_region` | string | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `max_turns` | string | `60` | Maximum agentic turns. |
 | `report_dir` | string | `docs/audit-reports` | Directory for the dated report (`<report_dir>/<slug>-audit-report-YYYY-MM-DD.md`). |

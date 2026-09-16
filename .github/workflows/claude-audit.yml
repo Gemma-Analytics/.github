@@ -39,7 +39,7 @@ on:
       model:
         description: "Bedrock model ID"
         type: string
-        default: "eu.anthropic.claude-sonnet-4-6"
+        default: "eu.anthropic.claude-sonnet-5"
       aws_region:
         description: "AWS region for Bedrock OIDC"
         type: string

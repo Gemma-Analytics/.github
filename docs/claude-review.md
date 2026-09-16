@@ -99,7 +99,7 @@ jobs:
 
 | Input | Default | Description |
 |---|---|---|
-| `model` | `eu.anthropic.claude-sonnet-4-6` | Bedrock model ID. Upgrade to `eu.anthropic.claude-opus-4-8` for harder reviews at higher cost. |
+| `model` | `eu.anthropic.claude-sonnet-5` | Bedrock model ID. Upgrade to `eu.anthropic.claude-opus-4-8` for harder reviews at higher cost. |
 | `aws_region` | `eu-central-1` | AWS region for Bedrock OIDC. All Gemma infra is in `eu-central-1`; only change if the repo's workload is in another region. |
 | `additional_instructions` | _(empty)_ | Repo-specific rules appended to the base 9-category prompt. One bullet per line. Claude checks these on top of the standard sweep. Use this for domain-specific contracts (schema conventions, required test patterns, etc.). |
 | `max_turns` | `50` | Maximum agentic turns. Raised from the action default to support the 9-category sweep on large diffs. Reduce if costs are too high on a specific repo. |
