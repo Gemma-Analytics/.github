@@ -10,6 +10,8 @@ Once onboarding is complete, the client can use all three reusable workflows fro
 
 **Time:** ~30 minutes per client (after initial setup).
 
+> **Using Claude Code?** The [`onboard-claude-code-client`](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/.claude/skills/onboard-claude-code-client/SKILL.md) skill in `gemma-infrastructure` runs all of Phase 1 end to end — AWS provisioning, the GitHub App key, the 1Password item, the handoff package — and documents every real gotcha hit onboarding clients so far. Just ask Claude Code to onboard the client.
+
 ## Contents
 
 - [How Onboarding Works](#how-onboarding-works)
