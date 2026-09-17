@@ -44,13 +44,20 @@ Client repo                       Gemma-Analytics/.github              AWS / Git
 
 ```
 PR opened ──────────────────────────────────────────────────────────▶ review fires
+PR opened as draft ─────────────────────────────────────────────────▶ (no-op — reviewed when marked ready)
 PR draft → ready ───────────────────────────────────────────────────▶ review fires
 New commit pushed ───────────────────────────────────────────────────▶ (no-op)
 
 Comment: "@claude review" ───────────────────────────────────────────▶ review fires
 Comment: "@claude review focus on auth" ─────────────────────────────▶ review fires (with focus)
 Comment: "@claude what does this do?" ───────────────────────────────▶ routes to claude.yml
+Comment quoting "> ... @claude review ..." ──────────────────────────▶ (no-op)
 ```
+
+Two trigger rules are worth spelling out:
+
+- **Quoting the footer does not retrigger a review.** The comment condition uses `startsWith(comment.body, '@claude review')`. A quoted line begins with `>`, so replying with GitHub's "Quote reply" to a review (which quotes the footer "You can request a new review by commenting `@claude review`") never matches.
+- **Never add `synchronize` to the wrapper's `pull_request` types.** The review is designed as one-shot: it runs on open (or draft → ready) and on explicit `@claude review` requests. With `synchronize`, every push re-runs a full review, which produces the "never-ending review rounds" experience for authors and burns Bedrock spend on every commit.
 
 ### Concurrency
 
@@ -79,8 +86,10 @@ permissions:
 
 jobs:
   review:
+    # Draft PRs are skipped on 'opened' and reviewed once when marked ready —
+    # otherwise a PR opened as draft gets reviewed twice (opened + ready_for_review).
     if: |
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        startsWith(github.event.comment.body, '@claude review'))
