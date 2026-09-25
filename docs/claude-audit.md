@@ -29,9 +29,11 @@ Client repo                    Gemma-Analytics/.github              gemma-agenti
                                 │ 4. Checkout gemma-agentic-toolkit @ toolkit_ref ──────────────▶  plugins/<plugin>/
                                 │ 5. OIDC → assume IAM role ─────────────────────────────────────▶ AWS Bedrock
                                 │ 6. Copy plugins/<plugin>/skills/. → .claude/skills/              │
+                                │    Detect <instructions_file> (default gemma_lens.md)            │
                                 │ 7. Build generic prompt:                                         │
                                 │      read .claude/skills/<orchestrator_skill>/SKILL.md, follow it │
                                 │      write report to <report_dir>/<slug>-audit-report-DATE.md     │
+                                │      + Gemma Lens block (only if the file exists)                │
                                 │      + extra_instructions                                        │
                                 │ 8. claude-code-action@v1  (tools = allowed_tools) ─────────────▶ Claude (Bedrock)
                                 │ 9. Safety net: move report if written to repo root               │
@@ -65,6 +67,53 @@ change to this workflow.
 
 ---
 
+## Client instructions file (`gemma_lens.md`)
+
+A client repo can carry a `gemma_lens.md` file at its root to tune the audit for that repo.
+The workflow detects it and adds a fixed instruction block to the prompt. Without the file,
+the audit runs unchanged. Change the path with the `instructions_file` input.
+
+The file covers three things:
+
+- **Accepted deviations.** Parts of Gemma's standard setup the repo does not follow on
+  purpose. The audit lists them under `## Accepted deviations` in the report, with the
+  reason, instead of as open findings. The gap stops coming back as new every month, and
+  reviewers can still see it.
+- **Additional files.** Files that override or extend Gemma's standards for this repo, for
+  example a SQL style guide override.
+- **1Password references.** Which private 1Password items hold secrets that certain checks
+  need. The CI run only records them and marks such checks as Deferred. It never tries to
+  open them.
+
+Guardrails:
+
+- The file cannot override the workflow's hard rules or tool set.
+- It cannot hide a Critical-severity security finding. Such findings stay open, with the
+  conflicting deviation noted next to them.
+- The path must be repo-relative, without `..`, and not a symlink. Otherwise the workflow
+  ignores it and logs a warning.
+
+Template:
+
+```markdown
+# Gemma Lens instructions
+
+## Accepted deviations
+<!-- One bullet per deviation: check / location, and why it is intentional. -->
+- `audit-docker-compose` / `docker-compose.yml`: Postgres port 5432 is published because
+  the host firewall only allows the office VPN. Agreed with <client contact> on 1970-01-01.
+
+## Additional files
+<!-- Files the audit should read as local overrides of Gemma's standards. -->
+- `docs/sql-style-overrides.md`: overrides the Gemma SQL style guide (trailing commas).
+
+## 1Password references
+<!-- Item references only, never secret values. -->
+- `audit-server-config`: SSH key in 1Password item `<item-id>` (vault `<vault>`).
+```
+
+---
+
 ## Client wrappers
 
 ### Deployment-security audit (the default)
@@ -85,6 +134,7 @@ jobs:
     # If your repo has no SSH-based server audit in scope, you can defer it explicitly:
     with:
       extra_instructions: "Skip audit-server-config in this CI run; record it as Deferred."
+      # instructions_file: gemma_lens.md   # default; see "Client instructions file"
     secrets:
       CLAUDE_CODE_ROLE_ARN: ${{ secrets.CLAUDE_CODE_ROLE_ARN }}
       GEMMA_CLAUDE_ASSISTANT_APP_ID: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_ID }}
@@ -146,6 +196,7 @@ jobs:
 | `aws_region` | `eu-central-1` | AWS region for Bedrock OIDC. |
 | `max_turns` | `60` | Maximum agentic turns. |
 | `report_dir` | `docs/audit-reports` | Directory for the dated report. |
+| `instructions_file` | `gemma_lens.md` | Repo-relative path to the client's Gemma Lens instructions file. Ignored if missing. Change it only if the repo keeps the file elsewhere. |
 | `toolkit_ref` | `main` | `gemma-agentic-toolkit` ref for the skills. Pin to a release tag for reproducibility. |
 
 ¹ `Bash(find *),Bash(grep *),Bash(cat *),Bash(ls *),Read,Glob,Grep,Write`

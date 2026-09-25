@@ -389,6 +389,8 @@ jobs:
       GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY: ${{ secrets.GEMMA_CLAUDE_ASSISTANT_APP_PRIVATE_KEY }}
 ```
 
+To tune an audit for one repo, add a `gemma_lens.md` file at the repo root. List intentional deviations from Gemma's standard setup, extra files to consider, and 1Password references for checks that need secrets. See [Client instructions file](claude-audit.md#client-instructions-file-gemma_lensmd) for the format.
+
 Commit either file on a branch and merge to `main`. The monthly cron fires automatically from then on; to run an audit immediately, go to **Actions** → select the audit workflow → **Run workflow**.
 
 > **Tips:**
