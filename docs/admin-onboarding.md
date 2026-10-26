@@ -1,6 +1,6 @@
 # Client Onboarding — Internal Guide
 
-**Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows on their GitHub org.
+**Audience: Gemma engineers.** How to onboard a new external client for the Claude Code workflows on their GitHub org. For clients whose repositories live on GitLab, see [GitLab clients (gitlab.com)](#gitlab-clients-gitlabcom) — the AWS provisioning is similar, but there is no GitHub App and the handoff is a GitLab CI job.
 
 Once onboarding is complete, the client can use all three reusable workflows from this repository:
 
@@ -24,6 +24,7 @@ Once onboarding is complete, the client can use all three reusable workflows fro
   - [Step 5: Hand off to the client](#step-5-hand-off-to-the-client)
 - [Phase 2 — Client Org Admin Sets Up GitHub](#phase-2--client-org-admin-sets-up-github)
 - [Phase 3 — Client Developers Enable the Workflows](#phase-3--client-developers-enable-the-workflows)
+- [GitLab clients (gitlab.com)](#gitlab-clients-gitlabcom)
 - [Troubleshooting](#troubleshooting)
 
 ## How Onboarding Works
@@ -140,6 +141,22 @@ Done by any client developer with repository write access, per repo:
 2. Open a test PR → [Client Setup Guide — Step 4](client-setup-guide.md#step-4-test-it)
 
 Once the first review lands, onboarding is complete.
+
+---
+
+## GitLab clients (gitlab.com)
+
+First client on this track: envelio (2026-10). For clients whose repositories live on GitLab, only the AWS part matches the phases above: no GitHub App, no private key, no 1Password item, and no wrapper workflow, because the shared workflows in this repository are GitHub-only. Instead, the client adds a job to `.gitlab-ci.yml` that mints a GitLab CI ID token and exchanges it for temporary AWS credentials.
+
+1. **AWS IAM role** — a gemma-infrastructure PR as usual, but the client goes into `gitlab_ci_clients` instead of `claude_code_clients`, and the role is named `gitlab-ci-claude-code-<slug>`. Trust is scoped to specific projects, either by path (`sub_patterns`) or by numeric project ID (`project_ids`), never both.
+   ➡️ [Client AWS Provisioning — GitLab clients (gitlab.com)](https://github.com/Gemma-Analytics/gemma-infrastructure/blob/main/aws/account/cicd/docs/client-aws-provisioning.md#gitlab-clients-gitlabcom)
+2. **Bedrock quota** — unchanged from [Step 2](#step-2-set-bedrock-quotas-gemma-infrastructure), keyed on the new role name.
+3. **Skip** the GitHub App key and the 1Password item.
+4. **Hand off** the role ARN, the region (`eu-central-1`), and the setup doc `aws/account/cicd/docs/gitlab-client-setup.md` from gemma-infrastructure, which holds the copy-paste `.gitlab-ci.yml` job and a troubleshooting section.
+
+Verification is the client's first pipeline run: look for a successful `AssumeRoleWithWebIdentity` event in CloudTrail, then Bedrock invocations. Ask the client to run the job on a scratch branch and open a merge request.
+
+**Self-hosted GitLab:** the issuer URL is the provider's identity, so a self-managed instance needs its own OIDC provider resource in gemma-infrastructure, trusted by `sub` and `aud` only (the `project_id` and `namespace_id` condition keys are gitlab.com-only). The instance must be reachable from AWS STS over the public internet.
 
 ---
 
