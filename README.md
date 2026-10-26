@@ -14,7 +14,7 @@ Reusable GitHub Actions workflows for all Gemma Analytics repositories. Add thin
 
 All workflows authenticate to Claude via **AWS Bedrock** (OIDC, no API key stored), by default through Gemma's AWS account; clients can bring their own Bedrock role instead (see [Choosing Your Claude Credentials](docs/client-setup-guide.md#choosing-your-claude-credentials)). GitHub interactions use a **GitHub App token** (Gemma Claude Assistant) so comments and reactions appear under the bot account rather than a personal token.
 
-> **Note:** these workflows run on GitHub only. They depend on GitHub Actions and a GitHub App, so they cannot be used on GitLab, Bitbucket, or other platforms.
+> **Note:** these workflows run on GitHub only. They depend on GitHub Actions and a GitHub App, so they cannot be used on GitLab, Bitbucket, or other platforms. Clients on GitLab get the same Claude-on-Bedrock access through a different path: a per-project IAM role assumed with GitLab CI ID tokens, plus a job in `.gitlab-ci.yml` — see [GitLab clients](docs/admin-onboarding.md#gitlab-clients-gitlabcom).
 
 ---
 
