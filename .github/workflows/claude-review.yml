@@ -19,6 +19,10 @@ on:
         description: "Maximum number of agentic turns"
         type: string
         default: "50"
+      checklists_dir:
+        description: "Folder of checklist files; each starts with <!-- paths: ... --> and is only added when the PR touches those paths"
+        type: string
+        default: ""
     secrets:
       CLAUDE_CODE_ROLE_ARN:
         required: true
@@ -75,6 +79,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           ADDITIONAL: ${{ inputs.additional_instructions }}
+          CHECKLISTS_DIR: ${{ inputs.checklists_dir }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           cat > /tmp/review_prompt.txt << 'BASEPROMPT'
           You are a code reviewer performing a ONE-SHOT review of PR #PR_NUMBER_PLACEHOLDER.
@@ -141,6 +147,11 @@ jobs:
             - Do NOT invent problems. Only flag real issues you can point to in the diff.
             - Do NOT suggest stylistic changes unless CLAUDE.md mandates them.
             - Prefer specific line references over generalities.
+            - Every finding needs evidence: a file and line in this repository that you
+              read, or a quoted CLAUDE.md or checklist rule. A claim about how an external
+              tool behaves (dbt, Airflow, Snowflake, GitHub Actions, a library) needs a file
+              in this repository that shows it, e.g. the same syntax already used elsewhere.
+              Your memory of the docs is not evidence. Drop findings you cannot back.
 
           Formatting rules (apply to inline comments AND the summary)
             - Never write a bare "#" immediately followed by a number (e.g. "#1", "#2", "#3").
@@ -148,12 +159,38 @@ jobs:
               When numbering findings or referring to list positions, use "1." / "2." / "3.",
               or "1st" / "2nd" / "3rd", or phrasing like "item 2" / "the second finding".
               Only use "#<number>" when you genuinely intend to reference that issue or PR.
+            - Put file names, functions, decorators and values in backticks. Outside
+              backticks never write "@name": GitHub notifies the user of that name
+              (e.g. "@dlt.resource" pings the account "dlt").
           BASEPROMPT
 
           sed -i "s/PR_NUMBER_PLACEHOLDER/$PR_NUMBER/g" /tmp/review_prompt.txt
 
           if [ -n "$ADDITIONAL" ]; then
             printf '\nRepo-specific checks (apply in addition to the base categories above):\n%s\n' "$ADDITIONAL" >> /tmp/review_prompt.txt
+          fi
+
+          # Each checklist starts with <!-- paths: dags/ models/ --> (or *) and is only
+          # added when the PR changes a file under one of those paths.
+          if [ -n "$CHECKLISTS_DIR" ] && [ -d "$CHECKLISTS_DIR" ]; then
+            CHANGED=$(gh pr diff "$PR_NUMBER" --name-only)
+            for f in "$CHECKLISTS_DIR"/*.md; do
+              [ -e "$f" ] || continue
+              paths=$(head -n 1 "$f" | sed -nE 's/^<!-- paths: (.*) -->$/\1/p')
+              if [ -z "$paths" ]; then
+                echo "::warning::$f has no <!-- paths: ... --> first line, skipped"
+                continue
+              fi
+              set -f  # a `*` in the header means every PR, not a file glob
+              for prefix in $paths; do
+                if [ "$prefix" = "*" ] || printf '%s\n' "$CHANGED" | awk -v p="$prefix" 'index($0, p) == 1 { found = 1 } END { exit !found }'; then
+                  printf '\nChecklist %s (applies to this PR):\n' "$(basename "$f" .md)" >> /tmp/review_prompt.txt
+                  tail -n +2 "$f" >> /tmp/review_prompt.txt
+                  break
+                fi
+              done
+              set +f
+            done
           fi
 
           if [ "$EVENT_NAME" = "issue_comment" ]; then
@@ -185,6 +222,8 @@ jobs:
       - name: Post session cost
         if: always() && steps.claude.outputs.execution_file
         uses: actions/github-script@v7
+        env:
+          RUN_STARTED_AT: ${{ github.event.comment.created_at || github.event.pull_request.updated_at }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -203,14 +242,19 @@ jobs:
             const duration = result.duration_ms ? Math.round(result.duration_ms / 1000) : 0;
             const model = '${{ inputs.model }}';
 
-            const body = `**Claude review cost:** \$${cost.toFixed(4)} · ${turns} turns · ${duration}s · \`${model}\``;
+            const line = `\$${cost.toFixed(2)} · ${turns} turns · ${duration}s · \`${model}\``;
 
             const issue_number = context.issue?.number ?? context.payload.pull_request?.number;
-            if (issue_number) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body
-              });
+            if (!issue_number) return;
+            const { owner, repo } = context.repo;
+            // Append the cost to this run's summary, so each review is one comment.
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const started = new Date(process.env.RUN_STARTED_AT);
+            const summary = comments.reverse().find(c =>
+              c.user.type === 'Bot' && new Date(c.created_at) >= started &&
+              c.body.includes('You can request a new review by commenting'));
+            if (summary) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: summary.id, body: `${summary.body}\n${line}` });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: `**Claude review cost:** ${line}` });
             }
