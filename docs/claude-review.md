@@ -28,7 +28,6 @@ Client repo                       Gemma-Analytics/.github              AWS / Git
                                    │ 5. Build prompt                                 │
                                    │    └─ 9-category sweep instructions             │
                                    │    └─ append additional_instructions            │
-                                   │    └─ append matching checklists_dir files      │
                                    │    └─ append user focus text (from comment)     │
                                    │                                                 │
                                    │ 6. claude-code-action@v1 ──────────────────────▶│ Claude
@@ -100,8 +99,6 @@ jobs:
         - Any repo-specific rules (one per line)
         - e.g. Foreign keys must use on_delete=PROTECT
         - e.g. No dbt models without a schema.yml entry
-      # Optional: rules per folder, only added when the PR touches that folder
-      # checklists_dir: .github/review-checklists
     secrets: inherit
 ```
 
@@ -115,7 +112,6 @@ jobs:
 | `aws_region` | `eu-central-1` | AWS region for Bedrock OIDC. All Gemma infra is in `eu-central-1`; only change if the repo's workload is in another region. |
 | `additional_instructions` | _(empty)_ | Repo-specific rules appended to the base 9-category prompt. One bullet per line. Claude checks these on top of the standard sweep. Use this for domain-specific contracts (schema conventions, required test patterns, etc.). |
 | `max_turns` | `50` | Maximum agentic turns. Raised from the action default to support the 9-category sweep on large diffs. Reduce if costs are too high on a specific repo. |
-| `checklists_dir` | _(empty)_ | Folder of checklist files in the repo, e.g. `.github/review-checklists`. Each file's first line names the paths it applies to (`<!-- paths: dags/ models/ -->`, or `*` for every PR); a file is only added to the prompt when the PR changes something under one of them. Use it once `additional_instructions` grows past a few rules that only matter for parts of the repo. |
 
 ## Secrets (all required)
 
@@ -136,7 +132,7 @@ Claude posts:
 - **Summary comment** on the PR timeline — one-sentence verdict, followed by grouped findings
 - **Cost line**: spend, turn count, duration, and model, appended to the summary (a separate comment only if no summary was posted)
 
-All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads. Every finding must point to evidence in the repository (a file and line, or a quoted `CLAUDE.md` or checklist rule); claims about how an external tool behaves need a file in the repo that shows it.
+All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads. Every finding must point to evidence in the repository (a file and line, or a quoted `CLAUDE.md` rule). A claim about how an external tool behaves that no file in the repo shows is posted only as `[Suggestion]`.
 
 ---
 
@@ -151,17 +147,5 @@ additional_instructions: |
   - Python functions over 50 lines must have a docstring
   - Never use SELECT * in production queries
 ```
-
-### Checklists per path
-
-With `checklists_dir`, rules live in one file per topic instead of one long string, and a PR only gets the rules for the folders it touches:
-
-```markdown
-<!-- paths: dags/ -->
-- DAGs must not open connections at import time.
-- New DAGs set `catchup=False` unless a backfill is intended.
-```
-
-Check each rule against the repository before adding it: a rule the code does not actually follow makes the reviewer flag every PR. The files are read from the checked-out PR, so a PR can change them, the same as `CLAUDE.md`.
 
 To add a project-wide CLAUDE.md that the reviewer reads automatically, place one at the repo root. Claude reads it in Step 1 of every review and treats its rules as authoritative for the `[Style]` category.
