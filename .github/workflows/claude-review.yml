@@ -141,6 +141,9 @@ jobs:
             - Do NOT invent problems. Only flag real issues you can point to in the diff.
             - Do NOT suggest stylistic changes unless CLAUDE.md mandates them.
             - Prefer specific line references over generalities.
+            - Every finding needs evidence: a file and line in this repository that you
+              read, or a quoted CLAUDE.md rule. A finding about something missing (tests,
+              docs) points to where it belongs.
 
           Formatting rules (apply to inline comments AND the summary)
             - Never write a bare "#" immediately followed by a number (e.g. "#1", "#2", "#3").
@@ -185,6 +188,9 @@ jobs:
       - name: Post session cost
         if: always() && steps.claude.outputs.execution_file
         uses: actions/github-script@v7
+        env:
+          RUN_STARTED_AT: ${{ github.event.comment.created_at || github.event.pull_request.updated_at }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -203,14 +209,21 @@ jobs:
             const duration = result.duration_ms ? Math.round(result.duration_ms / 1000) : 0;
             const model = '${{ inputs.model }}';
 
-            const body = `**Claude review cost:** \$${cost.toFixed(4)} · ${turns} turns · ${duration}s · \`${model}\``;
+            const line = `\$${cost.toFixed(2)} · ${turns} turns · ${duration}s · \`${model}\``;
 
             const issue_number = context.issue?.number ?? context.payload.pull_request?.number;
-            if (issue_number) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body
-              });
+            if (!issue_number) return;
+            const { owner, repo } = context.repo;
+            // Append the cost to this run's summary, so each review is one comment.
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const started = new Date(process.env.RUN_STARTED_AT);
+            const summary = comments.reverse().find(c =>
+              c.user.login === `${process.env.APP_SLUG}[bot]` && new Date(c.created_at) >= started &&
+              c.body.includes('You can request a new review by commenting'));
+            try {
+              if (!summary) throw new Error('no summary from this run');
+              await github.rest.issues.updateComment({ owner, repo, comment_id: summary.id, body: `${summary.body}\n\n${line}` });
+            } catch (e) {
+              core.info(`Posting the cost on its own: ${e.message}`);
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: `**Claude review cost:** ${line}` });
             }

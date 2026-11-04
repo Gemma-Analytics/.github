@@ -36,7 +36,7 @@ Client repo                       Gemma-Analytics/.github              AWS / Git
                                    │    ├─ posts inline comments (mcp_inline)        │
                                    │    └─ posts summary via gh pr comment           │
                                    │                                                 │
-                                   │ 7. Post session cost comment                    │
+                                   │ 7. Append session cost to the summary           │
                                    └─────────────────────────────────────────────────┘
 ```
 
@@ -130,9 +130,9 @@ When using `secrets: inherit` inside Gemma Analytics org, these are already avai
 Claude posts:
 - **Inline comments** on the diff — prefixed `[Blocking]`, `[Style]`, or `[Suggestion]`
 - **Summary comment** on the PR timeline — one-sentence verdict, followed by grouped findings
-- **Cost comment** — spend, turn count, duration, and model
+- **Cost line**: spend, turn count, duration, and model, appended to the summary (a separate comment only if no summary was posted)
 
-All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads.
+All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads. Every finding must point to evidence in the repository: a file and line, or a quoted `CLAUDE.md` rule.
 
 ---
 
