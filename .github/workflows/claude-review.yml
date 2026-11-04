@@ -146,7 +146,8 @@ jobs:
               docs) points to where it belongs. A claim about how an external tool behaves
               (dbt, Airflow, Snowflake, GitHub Actions, a library) that no file in this
               repository shows is posted only as [Suggestion], saying that it rests on your
-              knowledge of the tool.
+              knowledge of the tool. The changed line shows what the code says, not how the
+              tool behaves: it is not evidence for such a claim.
 
           Formatting rules (apply to inline comments AND the summary)
             - Never write a bare "#" immediately followed by a number (e.g. "#1", "#2", "#3").
