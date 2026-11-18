@@ -19,6 +19,10 @@ on:
         description: "Maximum number of agentic turns"
         type: string
         default: "50"
+      allowed_bots:
+        description: "Comma-separated bot logins allowed to trigger the review (for example a repo's own agent App)"
+        type: string
+        default: "gemma-claude-assistant[bot],gemmbot"
     secrets:
       CLAUDE_CODE_ROLE_ARN:
         required: true
@@ -175,7 +179,7 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           use_bedrock: "true"
-          allowed_bots: "gemma-claude-assistant[bot],gemmbot"
+          allowed_bots: ${{ inputs.allowed_bots }}
           prompt: ${{ steps.prompt.outputs.value }}
           claude_args: >-
             --model ${{ inputs.model }}
