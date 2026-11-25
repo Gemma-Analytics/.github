@@ -130,7 +130,7 @@ When using `secrets: inherit` inside Gemma Analytics org, these are already avai
 Claude posts:
 - **Inline comments** on the diff — prefixed `[Blocking]`, `[Style]`, or `[Suggestion]`
 - **Summary comment** on the PR timeline — one-sentence verdict, followed by grouped findings
-- **Cost line**: spend, turn count, duration, and model, appended to the summary (a separate comment only if no summary was posted)
+- **Cost line**: spend, turn count, duration, and model, appended to the summary. A run without a summary posts the cost line as its own comment
 
 All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads. Every finding must point to evidence in the repository: a file and line, or a quoted `CLAUDE.md` rule.
 
