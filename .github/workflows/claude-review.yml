@@ -145,6 +145,9 @@ jobs:
             - Do NOT invent problems. Only flag real issues you can point to in the diff.
             - Do NOT suggest stylistic changes unless CLAUDE.md mandates them.
             - Prefer specific line references over generalities.
+            - Every finding needs evidence: a file and line in this repository that you
+              read, or a quoted CLAUDE.md rule. A finding about something missing (tests,
+              docs) points to where it belongs.
 
           Formatting rules (apply to inline comments AND the summary)
             - Never write a bare "#" immediately followed by a number (e.g. "#1", "#2", "#3").

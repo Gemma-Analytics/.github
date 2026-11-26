@@ -132,7 +132,7 @@ Claude posts:
 - **Summary comment** on the PR timeline — one-sentence verdict, followed by grouped findings
 - **Cost comment** — spend, turn count, duration, and model
 
-All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads.
+All blocking issues found inline are also listed in the summary, so the author has one complete list without hunting through diff threads. Every finding must point to evidence in the repository: a file and line, or a quoted `CLAUDE.md` rule.
 
 ---
 
